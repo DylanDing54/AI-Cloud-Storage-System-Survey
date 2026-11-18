@@ -8,7 +8,7 @@ A survey of how cloud service providers (CSPs), inference engines and storage ve
 
 | Folder | Contents |
 |---|---|
-| [`report/`](report/) | The report website: a home page ([read online](https://dylanding54.github.io/KV-Cache-Survey/report/)) linking three modules — Part 1 CSP and vendor survey, Part 2 AI inference engines, Part 3 big-data I/O management — plus a PDF edition with a table of contents and bookmark outline ([`KV_Cache_CSP_Survey.pdf`](report/KV_Cache_CSP_Survey.pdf)). Last updated 2026-11-18. |
+| [`report/`](report/) | The report website, organised as three modules that link to each other: [Part 1 · CSP and vendor survey](https://dylanding54.github.io/KV-Cache-Survey/report/) (entry page), [Part 2 · AI inference engines](https://dylanding54.github.io/KV-Cache-Survey/report/part2.html) and [Part 3 · Big-data I/O management](https://dylanding54.github.io/KV-Cache-Survey/report/part3.html). Also includes a PDF edition with a table of contents and bookmark outline ([`KV_Cache_CSP_Survey.pdf`](report/KV_Cache_CSP_Survey.pdf)). Last updated 2026-11-18. |
 | [`knowledge-base/`](knowledge-base/) | The same material as Markdown: one file per chapter, topic notes, extracted figures and a consolidated source index. |
 
 ## Coverage
