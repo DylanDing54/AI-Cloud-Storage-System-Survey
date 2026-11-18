@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="640" viewBox="0 0 1000 640" font-family="PingFang SC, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/></marker><marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2b6cb0"/></marker><marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker></defs>
+<rect x="0" y="0" width="1000" height="640" fill="#ffffff"/>
+
+<text x="20" y="28" font-size="17" font-weight="600" fill="#1a202c">DeepSeek V4.1 Flash 的 KV 组成与每 token 字节估算（本文估算）</text>
+<text x="20" y="48" font-size="11.5" text-anchor="start" fill="#4a5568">依据：HF config.json（40 层，compress_ratios，kv_source_layer_ids = [2, 8, 14, 20]）与 DeepInfer cache_engine.py 的分配逻辑；块大小 128 token，main KV 默认 FP4。</text>
+<rect x="20" y="62" width="960" height="165" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="32" y="82" font-size="13" font-weight="600" fill="#4a5568">① 40 层主干如何分配 KV（层号从 0 计）</text>
+<rect x="40.0" y="95" width="20.5" height="40" fill="#e2e8f0" stroke="#a0aec0"/>
+<rect x="62.5" y="95" width="20.5" height="40" fill="#e2e8f0" stroke="#a0aec0"/>
+<rect x="85.0" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#2c5282"/>
+<text x="95.25" y="120" font-size="11" text-anchor="middle" fill="#1a202c" font-weight="600">2</text>
+<rect x="107.5" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="130.0" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="152.5" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="175.0" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="197.5" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="220.0" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#2c5282"/>
+<text x="230.25" y="120" font-size="11" text-anchor="middle" fill="#1a202c" font-weight="600">8</text>
+<rect x="242.5" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="265.0" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="287.5" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="310.0" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="332.5" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="355.0" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#2c5282"/>
+<text x="365.25" y="120" font-size="11" text-anchor="middle" fill="#1a202c" font-weight="600">14</text>
+<rect x="377.5" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="400.0" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="422.5" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="445.0" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="467.5" y="95" width="20.5" height="40" fill="#bee3f8" stroke="#a0aec0"/>
+<rect x="490.0" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#2c5282"/>
+<text x="500.25" y="120" font-size="11" text-anchor="middle" fill="#1a202c" font-weight="600">20</text>
+<rect x="512.5" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="535.0" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="557.5" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="580.0" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="602.5" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="625.0" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="647.5" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="670.0" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="692.5" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="715.0" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="737.5" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="760.0" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="782.5" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="805.0" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="827.5" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="850.0" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="872.5" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="895.0" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<rect x="917.5" y="95" width="20.5" height="40" fill="#fbd38d" stroke="#a0aec0"/>
+<text x="40" y="155" font-size="12" text-anchor="start" fill="#4a5568">灰：层 0–1 仅滑动窗口（SWA）</text>
+<text x="270" y="155" font-size="12" text-anchor="start" fill="#2b6cb0">蓝：层 2–19，压缩比 2（每 2 token 一个 KV 条目）</text>
+<text x="620" y="155" font-size="12" text-anchor="start" fill="#b7791f">橙：层 20–39，压缩比 1（层 21 起为 YOCO 解码侧）</text>
+<text x="40" y="178" font-size="12" text-anchor="start" fill="#1a202c">粗框数字 = KV 源层：只有层 2 / 8 / 14 / 20 自己分配 main KV 与 indexer K，其余层按“最近的前置源层”复用（share-KV）。</text>
+<text x="40" y="198" font-size="12" text-anchor="start" fill="#1a202c">前 20 层的 SWA 窗口需跨请求保存（stored region）；YOCO consumer 层的 SWA 不保存，靠 prefill 末尾 128 token 重算恢复。</text>
+<text x="40" y="216" font-size="12" text-anchor="start" fill="#718096">另有 3 个 NextN（DSpark 草稿）层，不计入下表。</text>
+<rect x="20" y="245" width="470" height="235" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="32" y="265" font-size="13" font-weight="600" fill="#4a5568">② 每个 128-token 块落到 3FS 的字节（block KV）</text>
+<text x="40" y="285" font-size="12.5" text-anchor="start" fill="#1a202c" font-weight="600">源层</text>
+<text x="175" y="285" font-size="12.5" text-anchor="start" fill="#1a202c" font-weight="600">条目/块</text>
+<text x="260" y="285" font-size="12.5" text-anchor="start" fill="#1a202c" font-weight="600">main KV</text>
+<text x="370" y="285" font-size="12.5" text-anchor="start" fill="#1a202c" font-weight="600">indexer K</text>
+<text x="40" y="311" font-size="12.5" text-anchor="start" fill="#1a202c">2、8、14（各）</text>
+<text x="175" y="311" font-size="12.5" text-anchor="start" fill="#1a202c">64</text>
+<text x="260" y="311" font-size="12.5" text-anchor="start" fill="#1a202c">64×288 B</text>
+<text x="370" y="311" font-size="12.5" text-anchor="start" fill="#1a202c">64×68 B</text>
+<text x="40" y="337" font-size="12.5" text-anchor="start" fill="#1a202c">20</text>
+<text x="175" y="337" font-size="12.5" text-anchor="start" fill="#1a202c">128</text>
+<text x="260" y="337" font-size="12.5" text-anchor="start" fill="#1a202c">128×288 B</text>
+<text x="370" y="337" font-size="12.5" text-anchor="start" fill="#1a202c">128×68 B</text>
+<text x="40" y="367" font-size="11.5" text-anchor="start" fill="#4a5568">main KV：512 维 e2m1（FP4）256 B + 32 个 e4m3 scale = 288 B</text>
+<text x="40" y="385" font-size="11.5" text-anchor="start" fill="#4a5568">indexer K：128 维 FP4 64 B + 4 B UE8M0 scale = 68 B</text>
+<rect x="40" y="399" width="430" height="54" rx="6" fill="#f0fff4" stroke="#38a169" stroke-width="1.3"/>
+<text x="255.0" y="421.6" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">合计 3×(18,432+4,352) + (36,864+8,704) = 113,920 B / 块</text>
+<text x="255.0" y="439.1" font-size="12.5" text-anchor="middle" fill="#1a202c">≈ 890 B / token（本文估算）</text>
+<rect x="510" y="245" width="470" height="235" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="522" y="265" font-size="13" font-weight="600" fill="#4a5568">③ 每个序列额外的 SWA 状态（不进 3FS）</text>
+<rect x="530" y="285" width="430" height="75" rx="6" fill="#fff5f5" stroke="#c0392b" stroke-width="1.3"/>
+<text x="745.0" y="309.9" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">state_size_to_disk</text>
+<text x="745.0" y="326.7" font-size="12" text-anchor="middle" fill="#1a202c">= 20 层 × 134 token × 528 B = 1,415,040 B / 序列</text>
+<text x="745.0" y="343.5" font-size="12" text-anchor="middle" fill="#1a202c">（128 窗口 + 6 个推测回退位置；528 B = MXFP8 格式）</text>
+<rect x="530" y="375" width="430" height="85" rx="6" fill="#f7fafc" stroke="#718096" stroke-width="1.3"/>
+<text x="745.0" y="404.9" font-size="12" text-anchor="middle" fill="#1a202c">只在 128 token 整数倍处保存；</text>
+<text x="745.0" y="421.7" font-size="12" text-anchor="middle" fill="#1a202c">存在产生它的机器的主机内存，单副本；</text>
+<text x="745.0" y="438.5" font-size="12" text-anchor="middle" fill="#1a202c">与上下文长度无关，长上下文下摊薄到每 token 很小</text>
+<rect x="20" y="498" width="960" height="130" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="32" y="518" font-size="13" font-weight="600" fill="#4a5568">④ 每 token KV 字节对比（对数刻度，本文估算）</text>
+<text x="40" y="543" font-size="12" text-anchor="start" fill="#1a202c">V3 若用 MHA（128 头，K 192 维 + V 128 维，BF16，61 层）</text>
+<rect x="520" y="531" width="338.30782406226166" height="18" fill="#c0392b" stroke="none"/>
+<text x="866.3078240622617" y="545" font-size="12" text-anchor="start" fill="#1a202c" font-weight="600">4,997,120 B</text>
+<text x="40" y="575" font-size="12" text-anchor="start" fill="#1a202c">V3 MLA 潜向量（512 + 64 维，BF16，61 层）</text>
+<rect x="520" y="563" width="204.96832661505314" height="18" fill="#4a77b4" stroke="none"/>
+<text x="732.9683266150531" y="577" font-size="12" text-anchor="start" fill="#1a202c" font-weight="600">70,272 B</text>
+<text x="40" y="607" font-size="12" text-anchor="start" fill="#1a202c">V4.1 Flash block KV（上图②）</text>
+<rect x="520" y="595" width="68.35608047843373" height="18" fill="#38a169" stroke="none"/>
+<text x="596.3560804784337" y="609" font-size="12" text-anchor="start" fill="#1a202c" font-weight="600">890 B</text>
+</svg>

@@ -31,7 +31,7 @@ Markdown edition of every chapter in the report, plus the figures and a consolid
 | 03 | 2.1 SGLang | [HDD 接入路线与改动范围](inference-engines/03-hdd-design.md) | Engineering routes and required changes for an HDD tier |
 | 04 | 2.1 SGLang | [可行性验证与判定标准](inference-engines/04-validation.md) | Validation plan and pass criteria |
 | 05 | 2.2 vLLM | [vLLM：KV 卸载与接入 HDD](inference-engines/05-vllm.md) | vLLM prefix cache, KV connector API, offloading connector fs tier and LMCache disk paths to HDD (with block diagrams) |
-| 06 | 2.3 DashInfer | [DashInfer：KV 缓存管理与接入 HDD](inference-engines/06-dashinfer.md) | DashInfer span-based KV, prefix cache, GPU-to-CPU swap and eviction; HDD extension points (with block diagrams) |
+| 06 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：DeepSeek 推理系统的 KV 缓存管理与硬盘缓存](inference-engines/06-deepseek.md) | DeepSeek's inference stack: MLA KV size, 3FS on-SSD context cache, PD disaggregation, HDD relevance (with block diagrams) |
 | 07 | 2.4 Enterprise research | [NVIDIA：完整 KV 是否值得长期保存](inference-engines/07-context-feasibility.md) | Enterprise research: is full long-context KV worth keeping? (NVIDIA) |
 
 ## Part 3 · Big-data I/O management (`bigdata-io/`)

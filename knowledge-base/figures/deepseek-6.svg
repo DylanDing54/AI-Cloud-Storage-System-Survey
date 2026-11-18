@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="625" viewBox="0 0 1000 625" font-family="PingFang SC, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/></marker><marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2b6cb0"/></marker><marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker></defs>
+<rect x="0" y="0" width="1000" height="625" fill="#ffffff"/>
+
+<text x="20" y="28" font-size="17" font-weight="600" fill="#1a202c">“硬盘缓存”的命中判定：API 规则与引擎侧的两段式查询</text>
+<rect x="20" y="45" width="960" height="175" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="32" y="65" font-size="13" font-weight="600" fill="#4a5568">① 对外：DeepSeek API 文档的落盘与命中规则</text>
+<rect x="40" y="80" width="290" height="120" rx="6" fill="#f7fafc" stroke="#718096" stroke-width="1.3"/>
+<text x="185.0" y="119.0" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">2024-08 首发时</text>
+<text x="185.0" y="135.8" font-size="12" text-anchor="middle" fill="#1a202c">以 64 token 为一个存储单元，</text>
+<text x="185.0" y="152.6" font-size="12" text-anchor="middle" fill="#1a202c">不足 64 token 不缓存；</text>
+<text x="185.0" y="169.4" font-size="12" text-anchor="middle" fill="#1a202c">从第 0 个 token 开始相同才算重复</text>
+<rect x="355" y="80" width="605" height="120" rx="6" fill="#ebf4ff" stroke="#4a77b4" stroke-width="1.3"/>
+<text x="657.5" y="102.2" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">现行文档：受 SWA 影响，按“缓存前缀单元”整体命中</text>
+<text x="657.5" y="119.0" font-size="12" text-anchor="middle" fill="#1a202c">落盘时机：① 请求结束位置（用户输入末尾、模型输出末尾各一个单元）</text>
+<text x="657.5" y="135.8" font-size="12" text-anchor="middle" fill="#1a202c">② 系统检测到多次请求的公共前缀时单独落盘</text>
+<text x="657.5" y="152.6" font-size="12" text-anchor="middle" fill="#1a202c">③ 长输入 / 长输出中按固定 token 间隔截取</text>
+<text x="657.5" y="169.4" font-size="12" text-anchor="middle" fill="#1a202c">后续请求必须完整匹配某个单元才命中；构建耗时秒级；尽力而为</text>
+<text x="657.5" y="186.2" font-size="12" text-anchor="middle" fill="#1a202c">usage 中返回 prompt_cache_hit_tokens / prompt_cache_miss_tokens</text>
+<path d="M330,140 L353,140" fill="none" stroke="#4a5568" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<rect x="20" y="240" width="960" height="370" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="32" y="260" font-size="13" font-weight="600" fill="#4a5568">② 对内：DeepInfer Q&amp;A 描述的命中长度计算（输入长度 L）</text>
+<rect x="40" y="280" width="200" height="70" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="140.0" y="302.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">上限</text>
+<text x="140.0" y="319.2" font-size="12" text-anchor="middle" fill="#1a202c">hit ≤ L − 134</text>
+<text x="140.0" y="336.0" font-size="12" text-anchor="middle" fill="#1a202c">（128 窗口 + 6 回退）</text>
+<rect x="275" y="280" width="230" height="70" rx="6" fill="#f0fff4" stroke="#38a169" stroke-width="1.3"/>
+<text x="390.0" y="302.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">查 block KV（kvcache-store 元数据）</text>
+<text x="390.0" y="319.2" font-size="12" text-anchor="middle" fill="#1a202c">得到 L1，</text>
+<text x="390.0" y="336.0" font-size="12" text-anchor="middle" fill="#1a202c">为 128-token 块的整数倍</text>
+<rect x="540" y="280" width="210" height="70" rx="6" fill="#fff5f5" stroke="#c0392b" stroke-width="1.3"/>
+<text x="645.0" y="302.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">查 SWA KV</text>
+<text x="645.0" y="319.2" font-size="12" text-anchor="middle" fill="#1a202c">Entrypoint 内存目录：</text>
+<text x="645.0" y="336.0" font-size="12" text-anchor="middle" fill="#1a202c">[L1−128, L1] 内有无快照</text>
+<path d="M240,315 L273,315" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M505,315 L538,315" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="785" y="255" width="175" height="55" rx="6" fill="#f0fff4" stroke="#38a169" stroke-width="1.3"/>
+<text x="872.5" y="286.9" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">有：命中长度 = L1</text>
+<rect x="785" y="330" width="175" height="55" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="872.5" y="353.3" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">无：回退一块</text>
+<text x="872.5" y="370.1" font-size="12" text-anchor="middle" fill="#1a202c">命中长度 = L1 − 128</text>
+<path d="M750,305 L783,285" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M750,325 L783,355" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="40" y="405" width="440" height="80" rx="6" fill="#faf5ff" stroke="#805ad5" stroke-width="1.3"/>
+<text x="260.0" y="432.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">Encoder SWA bounded replay</text>
+<text x="260.0" y="449.2" font-size="12" text-anchor="middle" fill="#1a202c">SWA 缺失时只重算命中前缀末尾 128 token，与未命中后缀一起前向；</text>
+<text x="260.0" y="466.0" font-size="12" text-anchor="middle" fill="#1a202c">只重建 SWA，block KV 原样复用、不重算也不覆盖</text>
+<rect x="520" y="405" width="440" height="80" rx="6" fill="#faf5ff" stroke="#805ad5" stroke-width="1.3"/>
+<text x="740.0" y="432.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">Decoder SWA bounded replay（YOCO / CED）</text>
+<text x="740.0" y="449.2" font-size="12" text-anchor="middle" fill="#1a202c">解码侧层每次 prefill 只重算 prompt 末尾 128 token，</text>
+<text x="740.0" y="466.0" font-size="12" text-anchor="middle" fill="#1a202c">结果只供 decode 用、不进前缀缓存；prefill 计算量近乎减半</text>
+<rect x="40" y="505" width="920" height="80" rx="6" fill="#f7fafc" stroke="#718096" stroke-width="1.3"/>
+<text x="500.0" y="532.4" font-size="12" text-anchor="middle" fill="#1a202c">兼容性键：(部署配置, 模型权重, 用户组)。模型权重、块字节布局、tokenizer 变化，</text>
+<text x="500.0" y="549.2" font-size="12" text-anchor="middle" fill="#1a202c">或改变 KV 数值的框架改动，都会使旧缓存不可复用；生产中未做过缓存格式迁移。</text>
+<text x="500.0" y="566.0" font-size="12" text-anchor="middle" fill="#1a202c">Prefill 调度用 2 次多项式 cost(q, c) 预测耗时，c 为该序列已算好（含命中）的前缀长度，命中长度直接进入调度的代价模型。</text>
+</svg>

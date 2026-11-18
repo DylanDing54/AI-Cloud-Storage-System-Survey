@@ -1,0 +1,146 @@
+{
+ "vendors": [
+  [
+   "01",
+   "AWS / Amazon Bedrock",
+   "托管 API + 自建推理集群 · 官方文档与官方博客",
+   "01-aws.md"
+  ],
+  [
+   "02",
+   "Tensormesh / LMCache 生态",
+   "开源 KV Cache 管理层 · 官方仓库 / 文档 / 技术报告",
+   "02-lmcache.md"
+  ],
+  [
+   "03",
+   "Microsoft / Azure",
+   "托管 API · 官方文档 + 官方研究 / 工程博客",
+   "03-microsoft.md"
+  ],
+  [
+   "04",
+   "Google Cloud / Gemini",
+   "托管 API + GKE 推理栈 · 官方文档 / 官方博客",
+   "04-google.md"
+  ],
+  [
+   "05",
+   "阿里云 / 百炼与 DashInfer",
+   "托管 API + 开源引擎 + 云上 KV 缓存服务 · 官方文档 / 官方仓库",
+   "05-alibaba.md"
+  ],
+  [
+   "06",
+   "腾讯云 / TACO FlexKV",
+   "开源多级缓存 + 引擎内前缀卸载 · 官方仓库 / 官方文档 / 官方文章",
+   "06-tencent.md"
+  ],
+  [
+   "07",
+   "百度 / PaddlePaddle FastDeploy",
+   "开源引擎 + 托管 API + 百舸平台 · 官方文档 / 官方仓库 / 官方技术文章",
+   "07-baidu.md"
+  ],
+  [
+   "08",
+   "CoreWeave / Cohere",
+   "联合案例 · LMCache 官方博客 / CoreWeave 官方文档",
+   "08-coreweave.md"
+  ],
+  [
+   "09",
+   "Moonshot AI / Kimi",
+   "服务平台 · 开源项目 · FAST'25 最佳论文 · 官方文档",
+   "09-moonshot.md"
+  ],
+  [
+   "10",
+   "NVIDIA / Dynamo",
+   "Seagate / SK hynix 混合存储方案中的 NVIDIA 技术栈",
+   "10-nvidia.md"
+  ],
+  [
+   "11",
+   "Seagate / SK hynix",
+   "SSD / HDD 混合 KV 联合白皮书",
+   "11-seagate.md"
+  ],
+  [
+   "12",
+   "Western Digital / Solidigm",
+   "缓冲层与 HDD / QLC 对照技术简报",
+   "12-wd.md"
+  ],
+  [
+   "13",
+   "AMD / MEXT",
+   "预测式 DRAM / NVMe 闪存分层 · AMD 官方产品页、白皮书、安装指南与案例",
+   "13-amd.md"
+  ],
+  [
+   "14",
+   "华为 / KVU",
+   "软硬协同路线 · 官方新闻稿 / 开源仓库 / 论文 + 媒体报道",
+   "14-huawei.md"
+  ],
+  [
+   "15",
+   "Meta",
+   "官方工程实践 · 通用内存卸载 + LLM 推理并行",
+   "15-meta.md"
+  ]
+ ],
+ "inference-engines": [
+  [
+   "01",
+   "SGLang：KV 缓存管理策略实现",
+   "推理引擎 · SGLang 固定提交源码与官方文档",
+   "01-sglang-impl.md"
+  ],
+  [
+   "02",
+   "SGLang：最底层接入 HDD",
+   "接口可行性 · 2026-11-16 固定版本源码核查",
+   "02-sglang.md"
+  ],
+  [
+   "03",
+   "HDD 接入路线与改动范围",
+   "工程可行性 · 区分现成接口与待开发优化",
+   "03-hdd-design.md"
+  ],
+  [
+   "04",
+   "可行性验证与判定标准",
+   "研究计划 · 非实测结论",
+   "04-validation.md"
+  ],
+  [
+   "05",
+   "vLLM：KV 卸载与接入 HDD",
+   "推理引擎 · vLLM 官方文档与固定提交源码核查",
+   "05-vllm.md"
+  ],
+  [
+   "06",
+   "DeepInfer：DeepSeek 推理系统的 KV 缓存管理与硬盘缓存",
+   "推理系统 · DeepSeek 官方文档、开源仓库与技术报告",
+   "06-deepseek.md"
+  ],
+  [
+   "07",
+   "NVIDIA：完整 KV 是否值得长期保存",
+   "需求可行性 · 企业上下文研究",
+   "07-context-feasibility.md"
+  ]
+ ],
+ "bigdata-io": [
+  [
+   "01",
+   "内容待补充",
+   "规划中",
+   "01-bigdata-io.md"
+  ]
+ ]
+}

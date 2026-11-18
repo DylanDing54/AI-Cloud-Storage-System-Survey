@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="700" viewBox="0 0 1000 700" font-family="PingFang SC, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/></marker><marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2b6cb0"/></marker><marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker></defs>
+<rect x="0" y="0" width="1000" height="700" fill="#ffffff"/>
+
+<text x="20" y="28" font-size="17" font-weight="600" fill="#1a202c">DeepSeek V4.1 Flash 推理系统的 KV 缓存数据通路（E/P/D 分离 + 专用 3FS 存储集群）</text>
+<text x="20" y="48" font-size="12" text-anchor="start" fill="#4a5568">黑色箭头：请求 / 元数据；蓝色箭头：KV 数据。组件名取自 DeepInfer 仓库 Q&amp;A 文档与架构图。</text>
+<rect x="20" y="65" width="150" height="60" rx="6" fill="#f7fafc" stroke="#718096" stroke-width="1.3"/>
+<text x="95.0" y="82.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">用户请求</text>
+<text x="95.0" y="99.2" font-size="12" text-anchor="middle" fill="#1a202c">Chat / Responses /</text>
+<text x="95.0" y="116.0" font-size="12" text-anchor="middle" fill="#1a202c">Messages API</text>
+<rect x="205" y="65" width="190" height="60" rx="6" fill="#f0fff4" stroke="#38a169" stroke-width="1.3"/>
+<text x="300.0" y="90.6" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">DeepSeek Recipe</text>
+<text x="300.0" y="108.1" font-size="12.5" text-anchor="middle" fill="#1a202c">协议 ↔ token 序列</text>
+<rect x="430" y="60" width="300" height="70" rx="6" fill="#fff5f5" stroke="#c0392b" stroke-width="1.3"/>
+<text x="580.0" y="82.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">Entrypoint</text>
+<text x="580.0" y="99.2" font-size="12" text-anchor="middle" fill="#1a202c">向本地 kvcache-store（CHECK 角色）做</text>
+<text x="580.0" y="116.0" font-size="12" text-anchor="middle" fill="#1a202c">哈希链前缀匹配，只查元数据，先算命中长度</text>
+<rect x="770" y="65" width="210" height="60" rx="6" fill="#ebf4ff" stroke="#4a77b4" stroke-width="1.3"/>
+<text x="875.0" y="82.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">Prefill Load Balancer</text>
+<text x="875.0" y="99.2" font-size="12" text-anchor="middle" fill="#1a202c">按上下文长度分 4 档；</text>
+<text x="875.0" y="116.0" font-size="12" text-anchor="middle" fill="#1a202c">无前缀亲和路由</text>
+<path d="M170,95 L203,95" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M395,95 L428,95" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M730,95 L768,95" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="20" y="160" width="470" height="300" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="32" y="180" font-size="13" font-weight="600" fill="#4a5568">Prefill 实例（PE，普通 8 卡机，EP2–8 / DP2–8）</text>
+<rect x="40" y="195" width="430" height="55" rx="6" fill="#f7fafc" stroke="#718096" stroke-width="1.3"/>
+<text x="255.0" y="218.5" font-size="11.5" text-anchor="middle" fill="#1a202c">前向：只算未命中后缀；SWA 缺失时回退 128 token 重算</text>
+<text x="255.0" y="234.6" font-size="11.5" text-anchor="middle" fill="#1a202c">（SWA bounded replay，代价与上下文长度无关）</text>
+<rect x="40" y="275" width="200" height="70" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="140.0" y="297.9" font-size="11.5" text-anchor="middle" fill="#1a202c" font-weight="600">引擎内 swap-in 线程</text>
+<text x="140.0" y="314.0" font-size="11.5" text-anchor="middle" fill="#1a202c">GDR：RDMA 网卡打满 PCIe，</text>
+<text x="140.0" y="330.1" font-size="11.5" text-anchor="middle" fill="#1a202c">不占 SM；逐层 H2D 与前向重叠</text>
+<rect x="270" y="275" width="200" height="70" rx="6" fill="#faf5ff" stroke="#805ad5" stroke-width="1.3"/>
+<text x="370.0" y="297.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">HBM：分页 block KV</text>
+<text x="370.0" y="314.2" font-size="12" text-anchor="middle" fill="#1a202c">（128 token / 块）</text>
+<text x="370.0" y="331.0" font-size="12" text-anchor="middle" fill="#1a202c">+ state cache（SWA）</text>
+<rect x="40" y="375" width="200" height="70" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="140.0" y="397.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">独立取数进程</text>
+<text x="140.0" y="414.2" font-size="12" text-anchor="middle" fill="#1a202c">异步把命中前缀的 KV</text>
+<text x="140.0" y="431.0" font-size="12" text-anchor="middle" fill="#1a202c">从 3FS 读入主机共享内存</text>
+<rect x="270" y="375" width="200" height="70" rx="6" fill="#f7fafc" stroke="#718096" stroke-width="1.3"/>
+<text x="370.0" y="405.8" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">主机共享内存</text>
+<text x="370.0" y="422.6" font-size="12" text-anchor="middle" fill="#1a202c">（host shared memory）</text>
+<path d="M240,410 L268,410" fill="none" stroke="#2b6cb0" stroke-width="1.6" marker-end="url(#b)"/>
+<path d="M370,375 L370,360 L140,360 L140,347" fill="none" stroke="#2b6cb0" stroke-width="1.6" marker-end="url(#b)"/>
+<path d="M240,310 L268,310" fill="none" stroke="#2b6cb0" stroke-width="1.6" marker-end="url(#b)"/>
+<path d="M370,275 L370,252" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#a)"/>
+<path d="M875,125 L875,145 L380,145 L380,158" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#a)"/>
+<text x="640" y="140" font-size="11.5" text-anchor="middle" fill="#4a5568">拉取请求（pull）</text>
+<rect x="560" y="160" width="420" height="300" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="572" y="180" font-size="13" font-weight="600" fill="#4a5568">Decode 实例（CE，64–128 卡超节点，Wide-EP64–128）</text>
+<rect x="580" y="195" width="380" height="55" rx="6" fill="#ebf4ff" stroke="#4a77b4" stroke-width="1.3"/>
+<text x="770.0" y="218.3" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">Decode Load Balancer</text>
+<text x="770.0" y="235.1" font-size="12" text-anchor="middle" fill="#1a202c">均衡请求数与总 KV 长度，按全局视图派发</text>
+<rect x="580" y="275" width="180" height="80" rx="6" fill="#faf5ff" stroke="#805ad5" stroke-width="1.3"/>
+<text x="670.0" y="302.4" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">HBM：block KV</text>
+<text x="670.0" y="319.2" font-size="12" text-anchor="middle" fill="#1a202c">+ state（SWA）</text>
+<text x="670.0" y="336.0" font-size="12" text-anchor="middle" fill="#1a202c">decode 不做 KV offload</text>
+<rect x="780" y="275" width="180" height="80" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="870.0" y="294.9" font-size="11.5" text-anchor="middle" fill="#1a202c" font-weight="600">decode 产生的 KV</text>
+<text x="870.0" y="311.0" font-size="11.5" text-anchor="middle" fill="#1a202c">仍写回 3FS</text>
+<text x="870.0" y="327.1" font-size="11.5" text-anchor="middle" fill="#1a202c">（write-back；写失败</text>
+<text x="870.0" y="343.2" font-size="11.5" text-anchor="middle" fill="#1a202c">不上报，读时严格校验）</text>
+<rect x="580" y="375" width="380" height="65" rx="6" fill="#f7fafc" stroke="#718096" stroke-width="1.3"/>
+<text x="770.0" y="403.5" font-size="11.5" text-anchor="middle" fill="#1a202c">缩容宽限 1 分钟：未完成请求连同 KV</text>
+<text x="770.0" y="419.6" font-size="11.5" text-anchor="middle" fill="#1a202c">一次性转发给其他 CE 继续解码</text>
+<path d="M470,300 L578,300" fill="none" stroke="#2b6cb0" stroke-width="1.6" marker-end="url(#b)"/>
+<text x="525" y="330" font-size="11.5" text-anchor="middle" fill="#2b6cb0">P→D</text>
+<text x="525" y="345" font-size="11" text-anchor="middle" fill="#2b6cb0">block KV</text>
+<text x="525" y="360" font-size="11" text-anchor="middle" fill="#2b6cb0">+ SWA KV</text>
+<text x="525" y="375" font-size="11" text-anchor="middle" fill="#2b6cb0">同一路径</text>
+<path d="M670,250 L670,273" fill="none" stroke="#4a5568" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="20" y="485" width="960" height="200" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="32" y="505" font-size="13" font-weight="600" fill="#4a5568">持久层与主机内存层</text>
+<rect x="40" y="520" width="560" height="145" rx="6" fill="#f0fff4" stroke="#38a169" stroke-width="1.3"/>
+<text x="320.0" y="554.7" font-size="12" text-anchor="middle" fill="#1a202c" font-weight="600">专用 3FS 存储集群（存 block KV：main KV + indexer K）</text>
+<text x="320.0" y="571.5" font-size="12" text-anchor="middle" fill="#1a202c">约 100 PiB SSD；推荐每台 20 × 30.73 TB SSD，读 ≥ 40 GB/s、写 ≥ 5 GB/s</text>
+<text x="320.0" y="588.3" font-size="12" text-anchor="middle" fill="#1a202c">10+2 纠删码：读请求同时发往组内 11 个节点，任意 10 个返回即可解码</text>
+<text x="320.0" y="605.1" font-size="12" text-anchor="middle" fill="#1a202c">kvcache-store 不做过期；每个存储节点一个 GC Worker 按 LRU 回收，</text>
+<text x="320.0" y="621.9" font-size="12" text-anchor="middle" fill="#1a202c">使用量压在水位之下；TTL：agent 3 天、chatbot 7 天</text>
+<text x="320.0" y="638.7" font-size="12" text-anchor="middle" fill="#1a202c">实践配比：每张在线 GPU 约 14.4 TB（逻辑容量）</text>
+<rect x="630" y="520" width="330" height="145" rx="6" fill="#fff5f5" stroke="#c0392b" stroke-width="1.3"/>
+<text x="795.0" y="556.3" font-size="11.5" text-anchor="middle" fill="#1a202c" font-weight="600">SWA KV（state）</text>
+<text x="795.0" y="572.4" font-size="11.5" text-anchor="middle" fill="#1a202c">只放在产生它的机器的主机内存，单副本，</text>
+<text x="795.0" y="588.5" font-size="11.5" text-anchor="middle" fill="#1a202c">不进 3FS；每序列落盘部分</text>
+<text x="795.0" y="604.6" font-size="11.5" text-anchor="middle" fill="#1a202c">20 层 × 134 token × 528 B = 1,415,040 B</text>
+<text x="795.0" y="620.7" font-size="11.5" text-anchor="middle" fill="#1a202c">Entrypoint 内存目录记录位置，</text>
+<text x="795.0" y="636.8" font-size="11.5" text-anchor="middle" fill="#1a202c">跨机命中经 400G VLAN 拉回</text>
+<path d="M140,518 L140,447" fill="none" stroke="#2b6cb0" stroke-width="1.6" marker-end="url(#b)"/>
+<text x="105" y="480" font-size="11.5" text-anchor="middle" fill="#2b6cb0">读（命中）</text>
+<path d="M960,315 L972,315 L972,472 L615,472 L615,590 L602,590" fill="none" stroke="#2b6cb0" stroke-width="1.6" marker-end="url(#b)"/>
+<text x="800" y="467" font-size="11.5" text-anchor="middle" fill="#2b6cb0">Decode 侧写回（官方架构图中写入 3FS 的箭头只出自 Decode）</text>
+</svg>
