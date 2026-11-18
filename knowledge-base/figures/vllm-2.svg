@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="640" viewBox="0 0 1000 640" font-family="PingFang SC, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/></marker><marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker></defs>
+<rect x="0" y="0" width="1000" height="640" fill="#ffffff"/>
+<text x="20" y="28" font-size="17" font-weight="600" fill="#1a202c">vLLM V1 GPU 前缀缓存：KVCacheManager / BlockPool / FreeKVCacheBlockQueue</text>
+<rect x="15" y="45" width="255" height="300" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="27" y="65" font-size="13" font-weight="600" fill="#4a5568">① 请求进入：按 block 计算链式哈希</text>
+<rect x="30" y="75" width="225" height="70" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="142.5" y="96.2" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">Request</text>
+<text x="142.5" y="113.8" font-size="12.5" text-anchor="middle" fill="#1a202c">prompt_token_ids（+ LoRA / 多模态</text>
+<text x="142.5" y="131.2" font-size="12.5" text-anchor="middle" fill="#1a202c">hash / cache_salt 等 extra_keys）</text>
+<rect x="30" y="170" width="225" height="75" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="142.5" y="193.8" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">request_block_hasher()</text>
+<text x="142.5" y="211.2" font-size="12.5" text-anchor="middle" fill="#1a202c">hash_block_tokens(</text>
+<text x="142.5" y="228.8" font-size="12.5" text-anchor="middle" fill="#1a202c">parent_hash, block_tokens, extra_keys)</text>
+<rect x="30" y="270" width="225" height="60" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="142.5" y="295.0" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">request.block_hashes</text>
+<text x="142.5" y="312.5" font-size="12.5" text-anchor="middle" fill="#1a202c">只对“满 block”生成哈希</text>
+<path d="M142,145 L142,168" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M142,245 L142,268" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="285" y="45" width="360" height="400" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="297" y="65" font-size="13" font-weight="600" fill="#4a5568">② Scheduler.schedule() 调用 KVCacheManager</text>
+<rect x="300" y="75" width="330" height="85" rx="6" fill="#ebf4ff" stroke="#4a77b4" stroke-width="1.3"/>
+<text x="465.0" y="95.0" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">get_computed_blocks(request)</text>
+<text x="465.0" y="112.5" font-size="12.5" text-anchor="middle" fill="#1a202c">→ KVCacheCoordinator.find_longest_cache_hit()</text>
+<text x="465.0" y="130.0" font-size="12.5" text-anchor="middle" fill="#1a202c">→ BlockPool.get_cached_block(hash)</text>
+<text x="465.0" y="147.5" font-size="12.5" text-anchor="middle" fill="#1a202c">返回最长“全命中前缀”的 block 列表</text>
+<rect x="300" y="180" width="330" height="125" rx="6" fill="#ebf4ff" stroke="#4a77b4" stroke-width="1.3"/>
+<text x="465.0" y="202.5" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">allocate_slots(request, num_new_tokens, …)</text>
+<text x="465.0" y="220.0" font-size="12.5" text-anchor="middle" fill="#1a202c">BlockPool.touch(命中块)：ref_cnt+1，</text>
+<text x="465.0" y="237.5" font-size="12.5" text-anchor="middle" fill="#1a202c">若 ref_cnt 原为 0 则 free_block_queue.remove()</text>
+<text x="465.0" y="255.0" font-size="12.5" text-anchor="middle" fill="#1a202c">BlockPool.get_new_blocks(n)：popleft_n()，</text>
+<text x="465.0" y="272.5" font-size="12.5" text-anchor="middle" fill="#1a202c">带哈希的块先 _maybe_evict_cached_block()</text>
+<text x="465.0" y="290.0" font-size="12.5" text-anchor="middle" fill="#1a202c">cache_full_blocks()：新满块写入哈希表</text>
+<rect x="300" y="325" width="330" height="105" rx="6" fill="#ebf4ff" stroke="#4a77b4" stroke-width="1.3"/>
+<text x="465.0" y="355.0" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">free(request)（请求结束 / 抢占）</text>
+<text x="465.0" y="372.5" font-size="12.5" text-anchor="middle" fill="#1a202c">SingleTypeKVCacheManager.free()</text>
+<text x="465.0" y="390.0" font-size="12.5" text-anchor="middle" fill="#1a202c">→ BlockPool.free_blocks(reversed(blocks))</text>
+<text x="465.0" y="407.5" font-size="12.5" text-anchor="middle" fill="#1a202c">ref_cnt 减到 0 才回到空闲队列</text>
+<path d="M255,300 L275,300 L275,117 L298,117" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="660" y="45" width="325" height="400" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="672" y="65" font-size="13" font-weight="600" fill="#4a5568">BlockPool（GPU 显存中的 KV 页元数据）</text>
+<rect x="675" y="75" width="295" height="95" rx="6" fill="#f0fff4" stroke="#3c8d5a" stroke-width="1.3"/>
+<text x="822.5" y="100.0" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">blocks: list[KVCacheBlock]</text>
+<text x="822.5" y="117.5" font-size="12.5" text-anchor="middle" fill="#1a202c">启动时一次性创建 num_gpu_blocks 个</text>
+<text x="822.5" y="135.0" font-size="12.5" text-anchor="middle" fill="#1a202c">block_id · ref_cnt · block_hash</text>
+<text x="822.5" y="152.5" font-size="12.5" text-anchor="middle" fill="#1a202c">prev_free_block / next_free_block</text>
+<rect x="675" y="190" width="295" height="80" rx="6" fill="#f0fff4" stroke="#3c8d5a" stroke-width="1.3"/>
+<text x="822.5" y="216.2" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">cached_block_hash_to_block</text>
+<text x="822.5" y="233.8" font-size="12.5" text-anchor="middle" fill="#1a202c">BlockHashToBlockMap：</text>
+<text x="822.5" y="251.2" font-size="12.5" text-anchor="middle" fill="#1a202c">BlockHashWithGroupId → KVCacheBlock</text>
+<rect x="675" y="290" width="295" height="70" rx="6" fill="#f0fff4" stroke="#3c8d5a" stroke-width="1.3"/>
+<text x="822.5" y="311.2" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">free_block_queue</text>
+<text x="822.5" y="328.8" font-size="12.5" text-anchor="middle" fill="#1a202c">FreeKVCacheBlockQueue（双向链表，</text>
+<text x="822.5" y="346.2" font-size="12.5" text-anchor="middle" fill="#1a202c">O(1) 从中间摘除 / 头尾插入）</text>
+<rect x="675" y="375" width="295" height="55" rx="6" fill="#f0fff4" stroke="#3c8d5a" stroke-width="1.3"/>
+<text x="822.5" y="397.5" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">null_block</text>
+<text x="822.5" y="415.0" font-size="12.5" text-anchor="middle" fill="#1a202c">占位块（滑窗等跳过的位置）</text>
+<path d="M630,117 L673,230" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="600" y="178" font-size="11" fill="#4a5568" text-anchor="start">hash 查找</text>
+<rect x="15" y="465" width="970" height="160" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="27" y="485" font-size="13" font-weight="600" fill="#4a5568">③ 空闲队列 = 淘汰顺序（LRU）</text>
+<text x="30" y="545" font-size="12" fill="#c0392b" text-anchor="start" font-weight="600">head</text>
+<rect x="70" y="515" width="80" height="45" rx="6" fill="#fff5f5" stroke="#a0aec0" stroke-width="1.3"/>
+<text x="110.0" y="532.5" font-size="11.5" text-anchor="middle" fill="#1a202c" font-weight="600">块 7</text>
+<text x="110.0" y="549.0" font-size="11.5" text-anchor="middle" fill="#1a202c">无哈希</text>
+<path d="M150,537 L163,537" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="165" y="515" width="80" height="45" rx="6" fill="#fff5f5" stroke="#a0aec0" stroke-width="1.3"/>
+<text x="205.0" y="532.5" font-size="11.5" text-anchor="middle" fill="#1a202c" font-weight="600">块 8</text>
+<text x="205.0" y="549.0" font-size="11.5" text-anchor="middle" fill="#1a202c">无哈希</text>
+<path d="M245,537 L258,537" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="260" y="515" width="80" height="45" rx="6" fill="#ebf4ff" stroke="#a0aec0" stroke-width="1.3"/>
+<text x="300.0" y="532.5" font-size="11.5" text-anchor="middle" fill="#1a202c" font-weight="600">块 4</text>
+<text x="300.0" y="549.0" font-size="11.5" text-anchor="middle" fill="#1a202c">有哈希</text>
+<path d="M340,537 L353,537" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="355" y="515" width="80" height="45" rx="6" fill="#ebf4ff" stroke="#a0aec0" stroke-width="1.3"/>
+<text x="395.0" y="532.5" font-size="11.5" text-anchor="middle" fill="#1a202c" font-weight="600">块 3</text>
+<text x="395.0" y="549.0" font-size="11.5" text-anchor="middle" fill="#1a202c">有哈希</text>
+<text x="450" y="543" font-size="16" fill="#718096" text-anchor="start">· · · · · ·</text>
+<rect x="540" y="515" width="80" height="45" rx="6" fill="#ebf4ff" stroke="#a0aec0" stroke-width="1.3"/>
+<text x="580.0" y="532.5" font-size="11.5" text-anchor="middle" fill="#1a202c" font-weight="600">块 2</text>
+<text x="580.0" y="549.0" font-size="11.5" text-anchor="middle" fill="#1a202c">有哈希</text>
+<rect x="635" y="515" width="80" height="45" rx="6" fill="#ebf4ff" stroke="#a0aec0" stroke-width="1.3"/>
+<text x="675.0" y="532.5" font-size="11.5" text-anchor="middle" fill="#1a202c" font-weight="600">块 1</text>
+<text x="675.0" y="549.0" font-size="11.5" text-anchor="middle" fill="#1a202c">有哈希</text>
+<path d="M620,537 L633,537" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="725" y="545" font-size="12" fill="#c0392b" text-anchor="start" font-weight="600">tail</text>
+<text x="762" y="500" font-size="11.5" fill="#4a5568" text-anchor="start">get_new_blocks() 从 head 取块；</text>
+<text x="762" y="517" font-size="11.5" fill="#4a5568" text-anchor="start">取到带哈希的块时，才把它从</text>
+<text x="762" y="534" font-size="11.5" fill="#4a5568" text-anchor="start">cached_block_hash_to_block 删除</text>
+<text x="762" y="563" font-size="11.5" fill="#4a5568" text-anchor="start">free_blocks()：无哈希块 prepend_n()</text>
+<text x="762" y="580" font-size="11.5" fill="#4a5568" text-anchor="start">到 head 先复用；有哈希块 append_n()</text>
+<text x="762" y="597" font-size="11.5" fill="#4a5568" text-anchor="start">到 tail（请求逆序，尾块先被淘汰）</text>
+<path d="M300,285 L291,285 L291,455 L110,455 L110,512" fill="none" stroke="#c0392b" stroke-width="1.5" marker-end="url(#r)"/>
+<text x="120" y="450" font-size="11" fill="#c0392b" text-anchor="start">get_new_blocks → popleft_n()</text>
+<path d="M560,430 L560,455 L675,455 L675,512" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="570" y="450" font-size="11" fill="#4a5568" text-anchor="start">free_blocks → append_n()</text>
+</svg>

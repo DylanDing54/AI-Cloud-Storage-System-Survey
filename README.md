@@ -8,15 +8,15 @@ A survey of how cloud service providers (CSPs), inference engines and storage ve
 
 | Folder | Contents |
 |---|---|
-| [`report/`](report/) | The full report as a self-contained HTML page ([read online](https://dylanding54.github.io/KV-Cache-Survey/report/)) and a PDF edition with a bookmark outline ([`KV_Cache_CSP_Survey_2026-11-18.pdf`](report/KV_Cache_CSP_Survey_2026-11-18.pdf)). Last updated 2026-11-18. |
+| [`report/`](report/) | The report website: a home page ([read online](https://dylanding54.github.io/KV-Cache-Survey/report/)) linking three modules — Part 1 CSP and vendor survey, Part 2 AI inference engines, Part 3 big-data I/O management — plus a PDF edition with a table of contents and bookmark outline ([`KV_Cache_CSP_Survey.pdf`](report/KV_Cache_CSP_Survey.pdf)). Last updated 2026-11-18. |
 | [`knowledge-base/`](knowledge-base/) | The same material as Markdown: one file per chapter, topic notes, extracted figures and a consolidated source index. |
 
 ## Coverage
 
-- **CSPs and managed APIs:** AWS, Microsoft Azure, Google Cloud, Alibaba Cloud, Tencent Cloud, Baidu, CoreWeave
-- **Inference systems and KV cache software:** LMCache / Tensormesh, Mooncake (Moonshot AI), NVIDIA Dynamo, SGLang HiCache
-- **Storage and memory vendors:** Seagate / SK hynix, Western Digital / Solidigm, AMD MEXT, Huawei, Meta TMO
-- **Feasibility analysis:** HDD integration routes, required changes, long-term KV retention value, validation criteria
+- **Part 1 · CSP and vendor survey:** AWS, Microsoft Azure, Google Cloud, Alibaba Cloud, Tencent Cloud, Baidu, CoreWeave; LMCache / Tensormesh, Mooncake (Moonshot AI), NVIDIA Dynamo; Seagate / SK hynix, Western Digital / Solidigm, AMD MEXT, Huawei, Meta TMO
+- **Part 2 · AI inference engines:** SGLang, vLLM and DashInfer — how each implements KV cache management (with block diagrams drawn from pinned source commits) and whether HDD can serve as the bottom tier; enterprise research on long-term KV retention
+- **Part 3 · Big-data I/O management:** to be added
+- Each part ends with a consolidated list of reference links.
 
 ## Notes
 

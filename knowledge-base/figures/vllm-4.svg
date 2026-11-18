@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="760" viewBox="0 0 1000 760" font-family="PingFang SC, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a5568"/></marker><marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker></defs>
+<rect x="0" y="0" width="1000" height="760" fill="#ffffff"/>
+<text x="20" y="28" font-size="17" font-weight="600" fill="#1a202c">KVConnectorBase_V1：调度侧与 Worker 侧钩子（一次 engine step）</text>
+<rect x="15" y="45" width="970" height="190" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="27" y="65" font-size="13" font-weight="600" fill="#4a5568">调度进程 · connector 角色 KVConnectorRole.SCHEDULER（每个 engine 一个实例）</text>
+<rect x="30" y="80" width="210" height="140" rx="6" fill="#ebf4ff" stroke="#4a77b4" stroke-width="1.3"/>
+<text x="135.0" y="118.8" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">_get_local_prefix_cache_hit()</text>
+<text x="135.0" y="136.2" font-size="12.5" text-anchor="middle" fill="#1a202c">先查 GPU 前缀缓存</text>
+<text x="135.0" y="153.8" font-size="12.5" text-anchor="middle" fill="#1a202c">得到本地命中 token 数</text>
+<text x="135.0" y="171.2" font-size="12.5" text-anchor="middle" fill="#1a202c">（按 block 对齐后交给</text>
+<text x="135.0" y="188.8" font-size="12.5" text-anchor="middle" fill="#1a202c"> connector）</text>
+<rect x="260" y="80" width="235" height="140" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="377.5" y="110.0" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">get_num_new_matched_tokens(</text>
+<text x="377.5" y="127.5" font-size="12.5" text-anchor="middle" fill="#1a202c">request, num_computed_tokens)</text>
+<text x="377.5" y="145.0" font-size="12.5" text-anchor="middle" fill="#1a202c">→ (外部可加载 token 数, 是否异步)</text>
+<text x="377.5" y="162.5" font-size="12.5" text-anchor="middle" fill="#1a202c">返回 None：仍在查找 / 搬运，</text>
+<text x="377.5" y="180.0" font-size="12.5" text-anchor="middle" fill="#1a202c">skip_request()，下一步重试</text>
+<text x="377.5" y="197.5" font-size="12.5" text-anchor="middle" fill="#1a202c">应无副作用，可被多次调用</text>
+<rect x="515" y="80" width="220" height="140" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="625.0" y="118.8" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">allocate_slots(…,</text>
+<text x="625.0" y="136.2" font-size="12.5" text-anchor="middle" fill="#1a202c">num_external_computed_tokens)</text>
+<text x="625.0" y="153.8" font-size="12.5" text-anchor="middle" fill="#1a202c">update_state_after_alloc()</text>
+<text x="625.0" y="171.2" font-size="12.5" text-anchor="middle" fill="#1a202c">异步加载：请求状态置为</text>
+<text x="625.0" y="188.8" font-size="12.5" text-anchor="middle" fill="#1a202c">WAITING_FOR_REMOTE_KVS</text>
+<rect x="755" y="80" width="215" height="140" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="862.5" y="118.8" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">build_connector_meta(</text>
+<text x="862.5" y="136.2" font-size="12.5" text-anchor="middle" fill="#1a202c">scheduler_output)</text>
+<text x="862.5" y="153.8" font-size="12.5" text-anchor="middle" fill="#1a202c">→ SchedulerOutput.</text>
+<text x="862.5" y="171.2" font-size="12.5" text-anchor="middle" fill="#1a202c">kv_connector_metadata</text>
+<text x="862.5" y="188.8" font-size="12.5" text-anchor="middle" fill="#1a202c">（本步要 load / save 的块）</text>
+<path d="M240,150 L258,150" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M495,150 L513,150" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M735,150 L753,150" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M862,220 L862,262" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="690" y="250" font-size="11" fill="#4a5568" text-anchor="start">SchedulerOutput 下发到每个 worker</text>
+<rect x="15" y="265" width="970" height="200" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="27" y="285" font-size="13" font-weight="600" fill="#4a5568">Worker 进程 · KVConnectorRole.WORKER（每个 GPU rank 一个实例）</text>
+<rect x="30" y="300" width="210" height="150" rx="6" fill="#f0fff4" stroke="#3c8d5a" stroke-width="1.3"/>
+<text x="135.0" y="352.5" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">bind_connector_metadata()</text>
+<text x="135.0" y="370.0" font-size="12.5" text-anchor="middle" fill="#1a202c">handle_preemptions()</text>
+<text x="135.0" y="387.5" font-size="12.5" text-anchor="middle" fill="#1a202c">被抢占 / 驱逐的块在</text>
+<text x="135.0" y="405.0" font-size="12.5" text-anchor="middle" fill="#1a202c">覆盖前先处理</text>
+<rect x="260" y="300" width="235" height="150" rx="6" fill="#f0fff4" stroke="#3c8d5a" stroke-width="1.3"/>
+<text x="377.5" y="352.5" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">start_load_kv(forward_context)</text>
+<text x="377.5" y="370.0" font-size="12.5" text-anchor="middle" fill="#1a202c">启动加载（可异步）</text>
+<text x="377.5" y="387.5" font-size="12.5" text-anchor="middle" fill="#1a202c">wait_for_layer_load(layer)</text>
+<text x="377.5" y="405.0" font-size="12.5" text-anchor="middle" fill="#1a202c">逐层前向前等待该层到位</text>
+<rect x="515" y="300" width="220" height="150" rx="6" fill="#f0fff4" stroke="#3c8d5a" stroke-width="1.3"/>
+<text x="625.0" y="352.5" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">模型前向</text>
+<text x="625.0" y="370.0" font-size="12.5" text-anchor="middle" fill="#1a202c">save_kv_layer(layer, kv_layer,</text>
+<text x="625.0" y="387.5" font-size="12.5" text-anchor="middle" fill="#1a202c">attn_metadata)</text>
+<text x="625.0" y="405.0" font-size="12.5" text-anchor="middle" fill="#1a202c">逐层发起保存（可异步）</text>
+<rect x="755" y="300" width="215" height="150" rx="6" fill="#f0fff4" stroke="#3c8d5a" stroke-width="1.3"/>
+<text x="862.5" y="343.8" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">wait_for_save()</text>
+<text x="862.5" y="361.2" font-size="12.5" text-anchor="middle" fill="#1a202c">get_finished() /</text>
+<text x="862.5" y="378.8" font-size="12.5" text-anchor="middle" fill="#1a202c">get_transfer_results()</text>
+<text x="862.5" y="396.2" font-size="12.5" text-anchor="middle" fill="#1a202c">get_block_ids_with_load_errors()</text>
+<text x="862.5" y="413.8" font-size="12.5" text-anchor="middle" fill="#1a202c">build_connector_worker_meta()</text>
+<path d="M862,262 L862,263" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M862,262 L135,262 L135,298" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M240,375 L258,375" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M495,375 L513,375" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M735,375 L753,375" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M862,450 L862,505" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="560" y="485" font-size="11" fill="#4a5568" text-anchor="start">KVConnectorOutput：finished_sending / finished_recving /</text>
+<text x="560" y="500" font-size="11" fill="#4a5568" text-anchor="start">invalid_block_ids（随 ModelRunnerOutput 回传）</text>
+<rect x="15" y="510" width="970" height="230" rx="10" fill="#f7f9fc" stroke="#a0aec0" stroke-dasharray="5 4"/>
+<text x="27" y="530" font-size="13" font-weight="600" fill="#4a5568">调度进程 · update_from_output()（同一 step 收尾）</text>
+<rect x="530" y="545" width="440" height="85" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="750.0" y="565.0" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">_update_from_kv_xfer_finished()</text>
+<text x="750.0" y="582.5" font-size="12.5" text-anchor="middle" fill="#1a202c">→ connector.update_connector_output()</text>
+<text x="750.0" y="600.0" font-size="12.5" text-anchor="middle" fill="#1a202c">finished_recving：WAITING_FOR_REMOTE_KVS → 可调度</text>
+<text x="750.0" y="617.5" font-size="12.5" text-anchor="middle" fill="#1a202c">finished_sending：延迟释放的块此时才 _free_blocks()</text>
+<rect x="30" y="545" width="470" height="85" rx="6" fill="#fff5f5" stroke="#c0392b" stroke-width="1.3"/>
+<text x="265.0" y="573.8" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">_handle_invalid_blocks(invalid_block_ids)</text>
+<text x="265.0" y="591.2" font-size="12.5" text-anchor="middle" fill="#1a202c">KVTransferConfig.kv_load_failure_policy</text>
+<text x="265.0" y="608.8" font-size="12.5" text-anchor="middle" fill="#1a202c">&quot;fail&quot;（默认）：请求以错误结束；&quot;recompute&quot;：重排重算</text>
+<rect x="30" y="650" width="940" height="75" rx="6" fill="#fffaf0" stroke="#c99a2e" stroke-width="1.3"/>
+<text x="500.0" y="673.8" font-size="12.5" text-anchor="middle" fill="#1a202c" font-weight="600">request_finished(request, block_ids) → (delay_free, kv_transfer_params)</text>
+<text x="500.0" y="691.2" font-size="12.5" text-anchor="middle" fill="#1a202c">请求结束时调用：返回 True 表示 connector 仍在异步发送 / 落盘，GPU 块暂不归还 BlockPool；</text>
+<text x="500.0" y="708.8" font-size="12.5" text-anchor="middle" fill="#1a202c">kv_transfer_params 随响应返回（P/D 分离时供下游实例拉取）</text>
+<path d="M862,505 L862,543" fill="none" stroke="#4a5568" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M530,590 L502,590" fill="none" stroke="#c0392b" stroke-width="1.5" marker-end="url(#r)"/>
+<text x="505" y="610" font-size="10.5" fill="#c0392b" text-anchor="start">有加载错误</text>
+</svg>

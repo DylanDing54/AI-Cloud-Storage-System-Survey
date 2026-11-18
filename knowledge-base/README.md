@@ -2,7 +2,7 @@
 
 Markdown edition of every chapter in the report, plus the figures and a consolidated source index, for search, reuse and citation. Chapter text is in Chinese; each chapter ends with its source list.
 
-## CSP and vendor survey (`vendors/`)
+## Part 1 · CSP and vendor survey (`vendors/`)
 
 | # | Chapter | Scope |
 |---|---|---|
@@ -22,14 +22,23 @@ Markdown edition of every chapter in the report, plus the figures and a consolid
 | 14 | [华为 / KVU](vendors/14-huawei.md) | UCM, KVU compute-storage module, OceanStor, CloudMatrix384 EMS |
 | 15 | [Meta](vendors/15-meta.md) | Transparent Memory Offloading (PSI + Senpai); LLM inference parallelism |
 
-## Feasibility analysis (`analysis/`)
+## Part 2 · AI inference engines (`inference-engines/`)
+
+| # | Section | Chapter | Scope |
+|---|---|---|---|
+| 01 | 2.1 SGLang | [SGLang：KV 缓存管理策略实现](inference-engines/01-sglang-impl.md) | SGLang KV management implementation: RadixCache, memory pools, request lifecycle, HiCache tiers (with block diagrams) |
+| 02 | 2.1 SGLang | [SGLang：最底层接入 HDD](inference-engines/02-sglang.md) | Interface feasibility: HiCache L3 file backend on HDD (source review) |
+| 03 | 2.1 SGLang | [HDD 接入路线与改动范围](inference-engines/03-hdd-design.md) | Engineering routes and required changes for an HDD tier |
+| 04 | 2.1 SGLang | [可行性验证与判定标准](inference-engines/04-validation.md) | Validation plan and pass criteria |
+| 05 | 2.2 vLLM | [vLLM：KV 卸载与接入 HDD](inference-engines/05-vllm.md) | vLLM prefix cache, KV connector API, offloading connector fs tier and LMCache disk paths to HDD (with block diagrams) |
+| 06 | 2.3 DashInfer | [DashInfer：KV 缓存管理与接入 HDD](inference-engines/06-dashinfer.md) | DashInfer span-based KV, prefix cache, GPU-to-CPU swap and eviction; HDD extension points (with block diagrams) |
+| 07 | 2.4 Enterprise research | [NVIDIA：完整 KV 是否值得长期保存](inference-engines/07-context-feasibility.md) | Enterprise research: is full long-context KV worth keeping? (NVIDIA) |
+
+## Part 3 · Big-data I/O management (`bigdata-io/`)
 
 | # | Chapter | Scope |
 |---|---|---|
-| 01 | [SGLang：最底层接入 HDD](analysis/01-sglang.md) | Interface feasibility: HiCache L3 file backend on HDD (source review) |
-| 02 | [HDD 接入路线与改动范围](analysis/02-hdd-design.md) | Engineering routes and required changes for an HDD tier |
-| 03 | [NVIDIA：完整 KV 是否值得长期保存](analysis/03-context-feasibility.md) | Is full long-context KV worth keeping? (NVIDIA long-context study) |
-| 04 | [可行性验证与判定标准](analysis/04-validation.md) | Validation plan and pass criteria |
+| 01 | [内容待补充](bigdata-io/01-bigdata-io.md) | Placeholder — to be added |
 
 ## Topic notes (`topics/`)
 
@@ -41,5 +50,5 @@ Markdown edition of every chapter in the report, plus the figures and a consolid
 
 ## Other files
 
-- [sources.md](sources.md) — all 177 cited sources with keys and URLs
-- [figures/](figures/) — figures extracted from the report (official diagrams, document screenshots, PDF page renders)
+- [sources.md](sources.md) — all 231 cited sources with keys and URLs
+- [figures/](figures/) — figures extracted from the report (official diagrams, document screenshots, PDF page renders, block diagrams drawn from source code)

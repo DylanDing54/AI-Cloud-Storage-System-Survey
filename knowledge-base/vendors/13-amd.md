@@ -4,10 +4,6 @@
 
 AMD MEXT Predictive Memory™ 是一款纯软件的内存分层产品。它把较冷的内存页从 DRAM 卸载到 NVMe 闪存，再用本地运行的 AI 预测引擎判断哪些页即将被访问，并在应用发起访问之前把它们搬回 DRAM。AMD 官方产品页的定位语是 “Making Flash Work Like DRAM”：让低成本、大容量的闪存在应用看来像 DRAM 速度的内存，形成介于 DRAM 和存储之间的新“性价比层”，以降低对昂贵 DRAM 的依赖。 [AMD1] 本章依据 AMD 官方产品页、收购博客、产品简报、安装指南、6 份性能白皮书和 AMD IT 内部部署案例整理，均为 2026-11-18 采集的官方材料。
 
-![AMD MEXT Predictive Memory 官方产品页首屏：“Making Flash Work Like DRAM”，页面分 Overview / How It Works / Workloads / FAQs / Resources 五部分](../figures/amd-1.png)
-
-*AMD MEXT Predictive Memory 官方产品页首屏：“Making Flash Work Like DRAM”，页面分 Overview / How It Works / Workloads / FAQs / Resources 五部分* — [原始来源](https://www.amd.com/en/products/software/mext.html)
-
 ### 1. 收购背景与产品定位
 
 AMD 于 **2026-06-15** 在官方博客宣布收购 MEXT。博客将内存描述为云和企业环境中 AI 模型、数据分析、虚拟化和 HPC 负载共同面对的关键约束，称 MEXT 是“AI 驱动内存优化技术的先行者”，其预测式内存技术“让闪存表现得更像 DRAM”，AMD 计划把这项技术整合到整个数据中心产品组合中，并吸收 MEXT 在内存系统和 AI 基础设施方面的团队。 [AMD2] AMD 在 2026 年第二季度财报（2026-08-04）中也把“收购 MEXT，为 AI 负载增加 AI 驱动的预测式内存技术、优化内存使用并扩展可用容量”列为当季数据中心业务进展之一。 [AMD10]
@@ -26,15 +22,11 @@ AMD 于 **2026-06-15** 在官方博客宣布收购 MEXT。博客将内存描述�
 
 白皮书的表述是：MEXT 让闪存在操作系统看来是“类 DRAM 内存”，AI 引擎用来“抵消闪存时延的影响”；从应用的视角看，相关内存页总是已经驻留在 DRAM 中，因此性能得以保持。 [AMD5] 与传统 swap 的区别在于方向：swap 是缺页之后被动换入，访问时延直接暴露给应用；MEXT 则是预测之后主动提前迁回，把闪存读取移出关键路径。
 
-![AMD MEXT 产品简报第 2 页：How It Works 三步流程，以及 EDA 静态时序分析的“1.5TB 全 DRAM vs 768GB DRAM + 768GB MEXT”对比](../figures/amd-2.png)
+![AMD MEXT 产品简报第 2 页：How It Works 三步流程，以及 EDA 静态时序分析的“1.5TB 全 DRAM vs 768GB DRAM + 768GB MEXT”对比](../figures/amd-1.png)
 
 *AMD MEXT 产品简报第 2 页：How It Works 三步流程，以及 EDA 静态时序分析的“1.5TB 全 DRAM vs 768GB DRAM + 768GB MEXT”对比* — [原始来源](https://www.amd.com/en/products/software/mext.html)
 
 AMD 的 SIGGRAPH 2026 官方博客用同样的语言描述该技术：识别哪些页在用、哪些已经变冷，把冷页卸载到 NAND 闪存，再用基于 AI 的预测引擎在应用再次请求前把它们移回 DRAM。 [AMD9]
-
-![AMD MEXT 官方产品页 How It Works 演示视频截帧：神经网络根据访问序列预测下一批要访问的内存页，并在页数组中提前搬移](../figures/amd-3.png)
-
-*AMD MEXT 官方产品页 How It Works 演示视频截帧：神经网络根据访问序列预测下一批要访问的内存页，并在页数组中提前搬移* — [原始来源](https://www.amd.com/en/products/software/mext.html)
 
 ### 3. 软件组成：驱动、AI 引擎、守护进程与 RAM View
 
@@ -49,7 +41,7 @@ AMD 的 SIGGRAPH 2026 官方博客用同样的语言描述该技术：识别哪�
 
 官方 FAQ 明确 MEXT 运行需要两个 CPU 核：一个给 AI 引擎、一个给守护进程，不需要 GPU，也没有网络或防火墙要求。 [AMD1] 白皮书描述 AI 引擎的设计灵感来自现代神经网络技术，但预测对象不是文字，而是“未来内存页访问的序列”。 [AMD5]
 
-![AMD MEXT 白皮书（Agentic AI，2026-11）第 5 页：MEXT Driver、MEXT AI Engine、RAM View 三个解决方案组件](../figures/amd-4.png)
+![AMD MEXT 白皮书（Agentic AI，2026-11）第 5 页：MEXT Driver、MEXT AI Engine、RAM View 三个解决方案组件](../figures/amd-2.png)
 
 *AMD MEXT 白皮书（Agentic AI，2026-11）第 5 页：MEXT Driver、MEXT AI Engine、RAM View 三个解决方案组件* — [原始来源](https://www.amd.com/content/dam/amd/en/documents/epyc-business-docs/white-papers/amd-mext-white-paper-agentic-ai-in-6th-gen-amd-epyc.pdf)
 
@@ -66,7 +58,7 @@ AMD 的 SIGGRAPH 2026 官方博客用同样的语言描述该技术：识别哪�
 | 其他 | 安装需 root；必须关闭 Secure Boot；系统中不能配置磁盘 swap 设备 |
 | 部署形态 | 裸金属或虚拟机均可；虚拟化环境部署在 guest OS 内，而非 hypervisor 层；云上只要满足软硬件要求即可，与云资源供给方式无关 |
 
-![AMD MEXT 安装指南 v1.2 第 5 页：硬件要求与 SSD 规格表（PCIe 代际、容量倍数、等级、耐久度）](../figures/amd-5.png)
+![AMD MEXT 安装指南 v1.2 第 5 页：硬件要求与 SSD 规格表（PCIe 代际、容量倍数、等级、耐久度）](../figures/amd-3.png)
 
 *AMD MEXT 安装指南 v1.2 第 5 页：硬件要求与 SSD 规格表（PCIe 代际、容量倍数、等级、耐久度）* — [原始来源](https://www.amd.com/en/search/documentation/hub.html#sortCriteria=%40amd_release_date%20descending&f-amd_product_brand=AMD%20MEXT%20Software&f-amd_document_type=User%20Guides)
 
@@ -96,7 +88,7 @@ AMD 官方产品页列出的目标负载为 EDA / 芯片设计、媒体与娱乐
 | PrimeTime，Azure HX VM（2× EPYC 9V33X，约 1.4TB DRAM） | DRAM-only 2 个并发作业 vs 加约 1.2TB MEXT 后 4 个并发作业 | 0.4314 → 0.6029 jobs/h，吞吐 +39.7%（单作业耗时 16,689s → 23,886s） | —（扩容场景） |
 | Apache Spark SQL（TPC-DS 派生，SF 10000），Azure EPYC 9V45 VM | 256GiB vs 128GiB DRAM + MEXT | 5,774.7s → 5,815.3s，为基线 99.3% | 约 1.99x |
 
-![AMD MEXT Agentic AI 白皮书第 7 页：全 DRAM 基线与 DRAM 减 50% / 75% 两种场景的实测结果表](../figures/amd-6.png)
+![AMD MEXT Agentic AI 白皮书第 7 页：全 DRAM 基线与 DRAM 减 50% / 75% 两种场景的实测结果表](../figures/amd-4.png)
 
 *AMD MEXT Agentic AI 白皮书第 7 页：全 DRAM 基线与 DRAM 减 50% / 75% 两种场景的实测结果表* — [原始来源](https://www.amd.com/content/dam/amd/en/documents/epyc-business-docs/white-papers/amd-mext-white-paper-agentic-ai-in-6th-gen-amd-epyc.pdf)
 

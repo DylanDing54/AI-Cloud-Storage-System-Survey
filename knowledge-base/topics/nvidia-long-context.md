@@ -1,6 +1,6 @@
 # NVIDIA *You don't need long context*：完整 KV 是否值得长期保存
 
-> 依据：Belcak et al.（NVIDIA），*You don't need long context*，arXiv:2611.05306v1，2026-11-03。<https://arxiv.org/abs/2611.05306v1>。报告对应章节见 [03-context-feasibility.md](../analysis/03-context-feasibility.md)。
+> 依据：Belcak et al.（NVIDIA），*You don't need long context*，arXiv:2611.05306v1，2026-11-03。<https://arxiv.org/abs/2611.05306v1>。报告对应章节见 [07-context-feasibility.md](../inference-engines/07-context-feasibility.md)。
 
 ## 1. 出发点：越靠后的 token 越贵
 
