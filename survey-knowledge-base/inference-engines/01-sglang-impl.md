@@ -6,6 +6,18 @@
 
 以文本生成请求为例，服务入口将输入交给 `TokenizerManager`，后者把文本编码为 token ID，并将请求送给 `Scheduler`。调度器持有活动请求，在组织下一批计算时匹配已缓存的前缀、为剩余 token 分配位置，再交给模型执行。生成的 token ID 经 `DetokenizerManager` 还原为文本，由前端返回给客户端。因而，前缀树和内存池影响的是调度器为一次前向计算准备哪些 token 与 KV 槽位。 [SGI30][SGI16]
 
+![SGLang 整体架构（本文依据固定提交绘制）。上半部是一次在线请求及返回路径，下半部区分 HiCache 的分层回填与 P/D 分离的跨实例传输。](../figures/sglang-runtime-hardware.svg)
+
+*SGLang 整体架构（本文依据固定提交绘制）。上半部是一次在线请求及返回路径，下半部区分 HiCache 的分层回填与 P/D 分离的跨实例传输。* — [原始来源](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers)
+
+### 从调度结果到物理设备：组批、显存访问与两种 KV 搬运
+
+**同一实例内。**CPU 上的调度器先决定哪些序列进入本轮、哪些 token 还需计算。前缀树给出可复用的位置，分配器为新 token 预留槽位；TP Worker 将批次交给 ModelRunner。注意力内核用槽位映射访问本 rank 的 KV 张量并把新增 KV 写入 HBM。加速卡执行矩阵乘、注意力和采样相关计算，CPU 继续维护队列和序列状态。即使全部命中也仍须执行本轮生成；命中省下的是重复的前缀计算。 [SGI31][SGI16][SGI30]
+
+**同一实例的容量分层。**GPU 没有目标前缀时，HiCache 可以从本机 L2 补回；L2 也缺失时，才按策略向 L3 发起预取。L3 面向页，GPU 前向按层消费 KV。页优先的主机布局有利于成批读写，回填时则要考虑同一层的数据是否连续。CPU–GPU 的 direct 模式使用标准 CUDA 拷贝，kernel 模式用 GPU 辅助搬运，二者占用的设备执行资源不同。L3 的文件后端可走本地块设备；Mooncake 后端可利用 RDMA 和多网卡。增加主机池只扩展本实例的 L2。 [SGI33]
+
+**两个实例之间。**启用 P/D 分离后，Prefill 端完成计算，Decode 端必须取得对应 KV 才能接着生成。SGLang 可用 Mooncake 或 NIXL 建立传输；Mooncake 的设备配置可以约束使用哪张网卡。路由与握手负责让两端找到对方及目标缓冲区，KV 有效载荷才消耗主机内或跨机链路带宽。这里应分别计时“请求等待 Decode 接收”和“搬运字节”，并记录是否使用 RDMA、TCP 或节点内互连。部署中可以同时启用 P/D 分离和 HiCache，两条路径会竞争 PCIe 或网卡带宽。 [SGI32][SGI33]
+
 本节讲 SGLang 自己怎样管理 KV Cache：一条请求的前缀怎样被认出来，KV 放在显存的什么位置，什么时候释放、淘汰，开启 HiCache 后又怎样在 GPU、主机内存和外部存储三级之间流动。本节与 HDD 接入章节使用同一个固定提交 `c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab`（2026-11-16），类名、函数名和默认值都按该提交的源码与仓库内文档核对，并补充了 LMSYS 官方博客的设计说明 [SGI16][SGI20][SGI21]。HDD 挂载、文件后端与待开发的优化见下一章。
 
 ### 总体分层：谁决定保留什么，谁管理内存
@@ -141,3 +153,6 @@ SGLang 用两级间接寻址实现前缀共享。第一级是 `ReqToTokenPool.re
 - **[SGI20]** [LMSYS 官方博客 · Fast and Expressive LLM Inference with RadixAttention and SGLang，2024-01-17（采集于 2026-11-18）](https://lmsys.org/blog/2024-01-17-sglang/)
 - **[SGI21]** [LMSYS 官方博客 · SGLang HiCache: Fast Hierarchical KV Caching with Your Favorite Storage Backends，2025-09-10（采集于 2026-11-18）](https://lmsys.org/blog/2025-09-10-sglang-hicache/)
 - **[SGI30]** [SGLang · 请求处理组件：TokenizerManager、Scheduler、DetokenizerManager（固定提交）](https://github.com/sgl-project/sglang/tree/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers)
+- **[SGI31]** [SGLang · TP Worker 与 ModelRunner 执行入口（固定提交）](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers/tp_worker.py)
+- **[SGI32]** [SGLang · P/D disaggregation：传输后端、设备选择与部署拓扑（固定提交）](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/docs/docs/advanced_features/pd_disaggregation.mdx)
+- **[SGI33]** [SGLang · HiCache：各层可见性、数据布局、I/O 内核与多 rank 同步（固定提交）](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/docs/docs/advanced_features/hicache_design.mdx)

@@ -38,6 +38,7 @@ Markdown edition of every chapter in the report (two books, four parts), plus th
 | 08 | 2.3 DeepInfer (DeepSeek) | [DeepInfer（DeepSeek）：HDD 接入方案与改动范围](inference-engines/08-deepseek-hdd.md) | 3FS baseline, proposed HDD cold tier and changes to the read/write paths |
 | 09 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：可行性验证与判定标准](inference-engines/09-deepseek-validation.md) | Reuse intervals, read deadlines and fault injection |
 | 10 | 2.4 Enterprise research | [NVIDIA：完整 KV 是否值得长期保存](inference-engines/10-context-feasibility.md) | Value of retaining full long-context KV |
+| 11 | 2.5 硬件协同 | [推理引擎与硬件协同：计算、互连、网络与存储](inference-engines/11-engine-hardware.md) | Compute and memory, GPU/NIC topology, RDMA fabrics, storage paths, bandwidth budgets and validation |
 
 # Book II · Big data
 

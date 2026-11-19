@@ -20,6 +20,14 @@ DeepSeek V4.1 Flash 的线上服务把视觉编码、提示词处理（Prefill�
 
 这里有两级调度。集群级路由决定请求交给哪台 Prefill 或 Decode 机器；实例内调度决定本步运行哪些序列、每条处理多长。在 Prefill 端，即使两个请求还有同样多的新 token，已存在的上下文长度也会改变计算耗时。官方实现以新 token 数和已有前缀长度估算成本，再按单步时间预算选择分块大小。 [DS2]
 
+### 硬件对接：超节点内的专家通信、跨节点 KV 与主机回填
+
+**模型计算。**DeepSeek 的 V4.1 Flash 部署在较小的 Prefill 组和较大的 Decode 组上运行：Prefill 已能为每个专家形成较大批量，较小的 EP 组有助于控制通信；Decode 使用 Wide-EP，把专家分摊到更多卡上。路由后的激活要到相应专家所在卡，结果再汇合。负载均衡器跟踪热点并调整冗余专家布局，官方还披露通过 NVLink 搬移组内专家权重。因而逐 token 延迟既受 HBM 访存影响，也受最慢专家和组内同步影响。 [DS2]
+
+**跨机器及存储。**部署 Q&A 对 P/D 互连给出每八张 GPU 约 400 Gb/s 的预算。这个数字描述链路规划。另一份 3FS 资料中的约 40 GiB/s 是存储读吞吐，两者测试对象、方向和单位不同。外部 block KV 命中后，取数进程先将数据从 3FS 放入主机共享内存，随后引擎线程做逐层 H2D。官方解释，细粒度 KV 上 CUDA 拷贝引擎效率较低，GPU 平台改由 RDMA 网卡通过 GDR 执行搬运，以利用 PCIe 并释放 SM。另有 SWA 状态可能从持有它的计算机经 400G VLAN 拉回。 [DS2][DS11][DS12]
+
+**硬件平台边界。**公开仓库列出 NVIDIA SM100 和华为昇腾 950，后者使用 CANN。Q&A 提供了同一功能在不同硬件上的具体差异：GPU 上的 Engram 词表可以分片留在主机内存，由网卡执行单边 RDMA 读取；该版本的 NPU 实现将 Engram 留在设备内存。Engram 是独立于 KV 的模型数据。这一差异也说明，评估 NPU 的 HBM 预算和互连流量时要按该平台实现核算。 [DS1][DS2]
+
 ### 一次多轮文本请求：从前缀匹配到返回答案
 
 1. **入口先查元数据。**Recipe 生成 token 序列后，Entrypoint 向 CHECK 角色查询哈希链，确定最长可复用前缀。命中长度必须在路由前已知，这一段时间计入请求启动开销。
@@ -94,6 +102,8 @@ Q&A 用一张表说明 KV 放在哪里：
 - **[DS8]** [DeepSeek API 文档 · 模型 & 价格（deepseek-flash / deepseek-v4-pro 缓存命中与未命中价格，采集于 2026-11-18）](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)
 - **[DS9]** [DeepSeek 官方 GitHub · open-infra-index《Day 6 - One More Thing: DeepSeek-V3/R1 Inference System Overview》，2025-02 Open Source Week](https://github.com/deepseek-ai/open-infra-index/blob/main/202502OpenSourceWeek/day_6_one_more_thing_deepseekV3R1_inference_system_overview.md)
 - **[DS10]** [DeepSeek 官方 GitHub · open-infra-index《The Path to Open-Sourcing the DeepSeek Inference Engine》，2025-04](https://github.com/deepseek-ai/open-infra-index/blob/main/OpenSourcing_DeepSeek_Inference_Engine/README.md)
+- **[DS11]** [DeepSeek 官方 GitHub · deepseek-ai/3FS README（Performance · KVCache 读吞吐与 GC IOPS 图，采集于 2026-11-18）](https://github.com/deepseek-ai/3FS)
+- **[DS12]** [DeepSeek 官方 GitHub · 3FS docs/design_notes.md（组件、CRAQ、chunk engine、USRBIO，采集于 2026-11-18）](https://github.com/deepseek-ai/3FS/blob/main/docs/design_notes.md)
 - **[DS14]** [DeepSeek-AI · DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model（arXiv:2405.04434，2024-05）](https://arxiv.org/abs/2405.04434)
 - **[DS15]** [DeepSeek-AI · DeepSeek-V3 Technical Report（arXiv:2412.19437，2024-12；§3.4 推理与部署）](https://arxiv.org/abs/2412.19437)
 - **[DS16]** [DeepSeek 官方 Hugging Face · deepseek-ai/DeepSeek-V3 config.json（kv_lora_rank、qk_rope_head_dim、num_hidden_layers 等，采集于 2026-11-18）](https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json)

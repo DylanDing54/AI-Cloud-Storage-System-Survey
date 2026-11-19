@@ -446,3 +446,12 @@ All references cited in the report, keyed as in the report text.
 | VL20 | vLLM V1 · EngineCore.step 与 step_with_batch_queue（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/engine/core.py> |
 | SGI30 | SGLang · 请求处理组件：TokenizerManager、Scheduler、DetokenizerManager（固定提交） | <https://github.com/sgl-project/sglang/tree/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers> |
 | DS17 | DeepInfer · LLMEngine：请求接入、C++ 调度、Worker 执行与结果处理（固定提交） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/deepinfer/engine/llm_engine.py> |
+| HW1 | NVIDIA · GPUDirect RDMA：内存注册、PCIe 层次及平台限制 | <https://docs.nvidia.com/cuda/gpudirect-rdma/index.html> |
+| HW2 | NVIDIA · RDMA over Converged Ethernet：RoCEv2 与网络配置 | <https://docs.nvidia.com/networking/display/mlnxenv24100700/rdma+over+converged+ethernet+(roce)> |
+| HW3 | NVIDIA DGX SuperPOD B200 参考架构 · Network Fabrics：计算与存储网络、rail 与交换拓扑 | <https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-b200/latest/network-fabrics.html> |
+| HW4 | NVIDIA · GPUDirect Storage Overview：存储与 GPU 的直接 DMA 路径 | <https://docs.nvidia.com/gpudirect-storage/overview-guide/index.html> |
+| SGI31 | SGLang · TP Worker 与 ModelRunner 执行入口（固定提交） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers/tp_worker.py> |
+| SGI32 | SGLang · P/D disaggregation：传输后端、设备选择与部署拓扑（固定提交） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/docs/docs/advanced_features/pd_disaggregation.mdx> |
+| SGI33 | SGLang · HiCache：各层可见性、数据布局、I/O 内核与多 rank 同步（固定提交） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/docs/docs/advanced_features/hicache_design.mdx> |
+| VL21 | vLLM · 并行扩展、多节点通信与 GPUDirect RDMA 验证（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/serving/parallelism_scaling.md> |
+| VL22 | vLLM · NixlConnector：侧通道、UCX、设备选择及 P/D 读取方向（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/features/nixl_connector_usage.md> |

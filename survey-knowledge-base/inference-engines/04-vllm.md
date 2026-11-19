@@ -19,6 +19,14 @@
 
 例如 TP=2、DP=4、PP=1 时，八张 GPU 组成四个双卡副本，对应四个 Engine Core。复用某个副本的本地前缀要求请求到达持有该前缀的副本；如需跨副本或跨存储层取回 KV，还需要相应的传输组件。 [VL19][VL4]
 
+### 硬件对接：模型并行、跨实例 KV 与文件卸载各走哪条路
+
+| 谁发起 | 数据经过哪里 | 如何核实 |
+|---|---|---|
+| 一个副本内的多个 GPU Worker | TP 将一层的运算分给多个 rank，并交换中间结果。节点内可用 NVLink / NVSwitch，或经 PCIe；跨机时，集合通信库根据拓扑选用网络传输。PP 则在连续层段之间交换激活。DP 副本各有自己的调度与 KV 状态。 | 先核对各 rank 与物理卡的映射，再查看 NCCL 日志实际采用的链路。同样的 TP 数，跨节点的同步等待可能让逐 token 延迟明显不同。 [VL19][VL21] |
+| P/D 实例间的 NixlConnector | 常规拉取模式中，P 完成 prefill 并保留 KV，D 根据交换的块与传输元数据从 P 读取，再继续生成。侧通道负责握手，批量数据由 NIXL 后端传送。默认 UCX 可以按设备和平台选用不同传输。 | 对照 D 端传输完成事件、P 端缓冲区保留时间、UCX 使用的网卡和 NIC 字节数。NCCL 的网卡配置只说明集合通信的配置；NIXL/UCX 有自己的设备选择。 [VL22][VL7][VL8] |
+| OffloadingConnector + fs 层 | GPU 块和 CPU 主层之间有设备搬运，文件二级层从主机缓冲区按 chunk 读写文件。目录落在本地 NVMe、HDD 或共享挂载点，会得到不同的物理路径。普通 fs 后端的直接 I/O 选项涉及页缓存；GPU 直读存储另有驱动和 API 要求。 | 同时核查模型重算量、CPU 主层命中、文件读入字节和设备读队列。仅从文件系统看到吞吐，无法判断 GPU 等待了多久。 [VL3][VL9][VL10] |
+
 ### 请求生命周期：长提示词如何与正在生成的请求同批运行
 
 1. **入队。**前端把编码后的请求送入引擎。调度器观察请求尚需计算的 token 数；前缀命中可缩短待处理区间。
@@ -74,7 +82,11 @@ vLLM V1 的 APC 采用哈希方案：每个 KV 块的键由**父块哈希、本�
 - **[VL6]** [vLLM 固定提交源码 · vllm/v1/core/block_pool.py（BlockPool、get_new_blocks、touch、free_blocks）与 kv_cache_utils.py（KVCacheBlock、FreeKVCacheBlockQueue、hash_block_tokens、NONE_HASH）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/core/block_pool.py)
 - **[VL7]** [vLLM 固定提交源码 · vllm/distributed/kv_transfer/kv_connector/v1/base.py（KVConnectorBase_V1 调度侧 / worker 侧方法定义）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/distributed/kv_transfer/kv_connector/v1/base.py)
 - **[VL8]** [vLLM 固定提交源码 · vllm/v1/core/sched/scheduler.py（get_num_new_matched_tokens 调用、WAITING_FOR_REMOTE_KVS、_update_from_kv_xfer_finished、_handle_invalid_blocks）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/core/sched/scheduler.py)
+- **[VL9]** [vLLM 固定提交源码 · vllm/v1/kv_offload/tiering/fs/manager.py 与 io.py（FileSystemTierManager、batch_store_block / batch_load_block、probe_o_direct）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/kv_offload/tiering/fs/manager.py)
+- **[VL10]** [vLLM 固定提交源码 · vllm/v1/kv_offload/tiering/manager.py（TieringOffloadingManager：级联、promotion、lookup、reset_cache）与 kv_connector/v1/offloading/scheduler.py](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/kv_offload/tiering/manager.py)
 - **[VL14]** [vLLM 固定提交源码 · vllm/config/cache.py（DEFAULT_BLOCK_SIZE、prefix_match_unit、kv_offloading_size / kv_offloading_backend）、config/vllm.py（_post_init_kv_transfer_config）、config/kv_transfer.py（kv_load_failure_policy）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/config/cache.py)
 - **[VL17]** [vLLM 官方文档 · NixlConnector Usage Guide（NIXL 传输后端选择，采集于 2026-11-18）](https://docs.vllm.ai/en/latest/features/nixl_connector_usage/)
 - **[VL19]** [vLLM V1 · Architecture Overview：在线服务进程、并行拓扑与调度预算（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/design/arch_overview.md)
 - **[VL20]** [vLLM V1 · EngineCore.step 与 step_with_batch_queue（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/engine/core.py)
+- **[VL21]** [vLLM · 并行扩展、多节点通信与 GPUDirect RDMA 验证（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/serving/parallelism_scaling.md)
+- **[VL22]** [vLLM · NixlConnector：侧通道、UCX、设备选择及 P/D 读取方向（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/features/nixl_connector_usage.md)
