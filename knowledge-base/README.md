@@ -1,6 +1,8 @@
 # Knowledge Base
 
-Markdown edition of every chapter in the report, plus the figures and a consolidated source index, for search, reuse and citation. Chapter text is in Chinese; each chapter ends with its source list.
+Markdown edition of every chapter in the report (two books, four parts), plus the figures and a consolidated source index, for search, reuse and citation. Chapter text is in Chinese; each chapter ends with its source list.
+
+# Book I · AI
 
 ## Part 1 · CSP and vendor survey (`vendors/`)
 
@@ -34,11 +36,33 @@ Markdown edition of every chapter in the report, plus the figures and a consolid
 | 06 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：DeepSeek 推理系统的 KV 缓存管理与硬盘缓存](inference-engines/06-deepseek.md) | DeepSeek's inference stack: MLA KV size, 3FS on-SSD context cache, PD disaggregation, HDD relevance (with block diagrams) |
 | 07 | 2.4 Enterprise research | [NVIDIA：完整 KV 是否值得长期保存](inference-engines/07-context-feasibility.md) | Enterprise research: is full long-context KV worth keeping? (NVIDIA) |
 
-## Part 3 · Big-data I/O management (`bigdata-io/`)
+# Book II · Big data
+
+## Part 3 · Big-data I/O optimization (`bigdata-io/`)
 
 | # | Chapter | Scope |
 |---|---|---|
-| 01 | [内容待补充](bigdata-io/01-bigdata-io.md) | Placeholder — to be added |
+| 01 | [AWS / Amazon S3](bigdata-io/01-bd-aws.md) | S3 heat management, ShardStore append-only storage node, request-spreading guidance; large drives at multi-tenant scale |
+| 02 | [Google / Colossus](bigdata-io/02-bd-google.md) | Colossus placement, flash caching (CacheSack, L4), "Disks for Data Centers" asks of HDD makers |
+| 03 | [Meta / Tectonic](bigdata-io/03-bd-meta.md) | Tectonic multi-tenant disk-time sharing, f4 warm storage, Tectonic-Shift flash tier for ML training IO |
+| 04 | [Microsoft / Azure Storage](bigdata-io/04-bd-azure.md) | WAS append-only stream layer, IO scheduling, LRC erasure coding, Pelican rack-scale cold storage |
+| 05 | [阿里云 / 盘古与 OSS](bigdata-io/05-bd-alibaba.md) | Pangu evolution, OSS SSD-fronted HDD path, SMRSTORE on host-managed SMR |
+| 06 | [国内厂商与存力政策](bigdata-io/06-bd-china.md) | Huawei OceanStor Pacific, Tencent, ByteDance HDD stacks; China storage-capacity (存力) policy |
+| 07 | [开源大数据存储：HDFS / Ozone / Ceph](bigdata-io/07-bd-opensource.md) | EC, storage policies, recovery throttles, Ceph DB/WAL sizing; Parquet / ORC / Iceberg IO patterns |
+| 08 | [Dropbox Magic Pocket 与 Backblaze](bigdata-io/08-bd-dropbox.md) | SMR at scale, hardware generations (racks and power per EB), Backblaze Drive Stats by capacity |
+| 09 | [HDD 厂商：密度与接口技术](bigdata-io/09-bd-hddtech.md) | HAMR / Mozaic, MACH.2 dual actuator, ePMR / UltraSMR, MAMR, CDL, depopulation, NVMe HDD |
+
+## Part 4 · HDD density and capacity (`bigdata-capacity/`)
+
+| # | Section | Chapter | Scope |
+|---|---|---|---|
+| 01 | 4.1 Constraints | [访问密度约束：IOPS/TB 与尾延迟](bigdata-capacity/01-cap-iops.md) | IOPS/TB and bandwidth/TB by capacity tier; which workloads are IOPS-bound; relief knobs |
+| 02 | 4.1 Constraints | [重建、故障域与数据可靠性](bigdata-capacity/02-cap-reliability.md) | Rebuild time and repair traffic by capacity; RAID vs replication vs EC / LRC; AFR by capacity; mitigations |
+| 03 | 4.1 Constraints | [写入模型约束：SMR / 分区存储与软件改造](bigdata-capacity/03-cap-write.md) | CMR vs DM-/HM-SMR, zone semantics, Linux zoned support, software changes and adopters |
+| 04 | 4.1 Constraints | [成本、功耗与机架密度：大容量盘的 TCO](bigdata-capacity/04-cap-tco.md) | $/usable TB model with IOPS-limited fill, W/TB, rack power limits, embodied carbon claims |
+| 05 | 4.2 Chinese customers | [国内客户为何认为 HDD 容量不需要太大](bigdata-capacity/05-cap-china.md) | Sourced vs inferred reasons, three-way split of objections, customer interview questions |
+| 06 | 4.3 Actions | [让高密度大容量成为真实需求：行动建议](bigdata-capacity/06-cap-actions.md) | Device, system / software and commercial levers mapped to objections; roadmap; where not to push |
+| 07 | 4.3 Actions | [验证方案与判定标准](bigdata-capacity/07-cap-validation.md) | Test scenarios, controlled variables, metrics and pass criteria for proving large drives at a customer |
 
 ## Topic notes (`topics/`)
 
@@ -50,5 +74,5 @@ Markdown edition of every chapter in the report, plus the figures and a consolid
 
 ## Other files
 
-- [sources.md](sources.md) — all 231 cited sources with keys and URLs
+- [sources.md](sources.md) — all 438 cited sources with keys and URLs
 - [figures/](figures/) — figures extracted from the report (official diagrams, document screenshots, PDF page renders, block diagrams drawn from source code)

@@ -138,9 +138,101 @@
  "bigdata-io": [
   [
    "01",
-   "内容待补充",
-   "规划中",
-   "01-bigdata-io.md"
+   "AWS / Amazon S3",
+   "EB 级对象存储 · HDD 热度管理 / 存储节点 / 官方演讲、论文与文档",
+   "01-bd-aws.md"
+  ],
+  [
+   "02",
+   "Google / Colossus",
+   "集群级文件系统 Colossus · 官方博客 / 论文 / 会议主题演讲",
+   "02-bd-google.md"
+  ],
+  [
+   "03",
+   "Meta / Tectonic",
+   "EB 级多租户文件系统 Tectonic / Tectonic-Shift · 官方论文与工程博客",
+   "03-bd-meta.md"
+  ],
+  [
+   "04",
+   "Microsoft / Azure Storage",
+   "超大规模云存储 · 追加写流层 / LRC 纠删码 / 机架级冷存储 · 官方论文与文档",
+   "04-bd-azure.md"
+  ],
+  [
+   "05",
+   "阿里云 / 盘古与 OSS",
+   "EB 级统一存储底座 + SMR 对象存储引擎 · USENIX FAST'23 论文与官方文档",
+   "05-bd-alibaba.md"
+  ],
+  [
+   "06",
+   "国内厂商与存力政策",
+   "国内厂商 EB 级 HDD 存储栈 + 产业政策 · 官方白皮书 / 数据手册 / 技术文章 / 政策原文",
+   "06-bd-china.md"
+  ],
+  [
+   "07",
+   "开源大数据存储：HDFS / Ozone / Ceph",
+   "开源大数据存储栈 · HDFS / Ozone / Ceph / 列存与湖仓 · 官方文档",
+   "07-bd-opensource.md"
+  ],
+  [
+   "08",
+   "Dropbox Magic Pocket 与 Backblaze",
+   "EB 级自建对象存储与公开盘群数据 · Dropbox Magic Pocket / Backblaze · 官方工程博客与 Drive Stats",
+   "08-bd-dropbox.md"
+  ],
+  [
+   "09",
+   "HDD 厂商：密度与接口技术",
+   "HDD 厂商器件级技术 · 官方新闻稿、产品手册、技术白皮书与 OCP 规范",
+   "09-bd-hddtech.md"
+  ]
+ ],
+ "bigdata-capacity": [
+  [
+   "01",
+   "访问密度约束：IOPS/TB 与尾延迟",
+   "容量约束分析 · 数据手册、OCP 规范与超大规模论文推演",
+   "01-cap-iops.md"
+  ],
+  [
+   "02",
+   "重建、故障域与数据可靠性",
+   "容量约束分析 · 纠删码论文、开源文档、厂商手册与 Backblaze 一手数据推演",
+   "02-cap-reliability.md"
+  ],
+  [
+   "03",
+   "写入模型约束：SMR / 分区存储与软件改造",
+   "容量约束分析 · 厂商白皮书、zonedstorage.io / Linux 文档与 Dropbox、阿里云一手资料",
+   "03-cap-write.md"
+  ],
+  [
+   "04",
+   "成本、功耗与机架密度：大容量盘的 TCO",
+   "容量约束分析 · 数据手册、机箱规格、LCA 报告与 TCO 推演",
+   "04-cap-tco.md"
+  ],
+  [
+   "05",
+   "国内客户为何认为 HDD 容量不需要太大",
+   "国内客户场景 · 官方技术博客、政策文本、行业白皮书与访谈提纲",
+   "05-cap-china.md"
+  ],
+  [
+   "06",
+   "让高密度大容量成为真实需求：行动建议",
+   "综合分析 · 基于前文各章来源事实的工程推论与行动建议",
+   "06-cap-actions.md"
+  ],
+  [
+   "07",
+   "验证方案与判定标准",
+   "研究计划 · 验证方案、指标公式与判定标准（非实测结论）",
+   "07-cap-validation.md"
   ]
  ]
 }
