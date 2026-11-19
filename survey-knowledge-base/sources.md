@@ -542,3 +542,10 @@ All references cited in the report, keyed as in the report text.
 | VL9 | vLLM 固定提交源码 · vllm/v1/kv_offload/tiering/fs/manager.py 与 io.py（FileSystemTierManager、batch_store_block / batch_load_block、probe_o_direct） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/kv_offload/tiering/fs/manager.py> |
 | W | WD × Solidigm · KV Cache Offload Across Storage Tiers，September 2026 / Revision 02 | <https://documents.westerndigital.com/content/dam/doc-library/en_us/assets/public/western-digital/collateral/tech-brief/technical-brief-kv-cache-offload-across-storage-tiers-wd.pdf> |
 | WP | WD · KV Cache Offload 官方介绍 | <https://www.westerndigital.com/resources/technical-brief/kv-cache-offload-tiered-storage-benchmark> |
+| SGI34 | LMSYS / SGLang · HiCache Across Multi-Parallelism and Distributed Serving，2026-11-02 | <https://lmsys.org/blog/2026-11-02-hicache-distributed-serving/> |
+| SGI35 | SGLang · HiCache host pool 自动定容与跨 rank 最小值（固定提交） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/mem_cache/hicache_auto_size.py#L60-L152> |
+| VL23 | vLLM V1 GPU Worker · determine_available_memory 与显存 profile（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/worker/gpu_worker.py#L716-L826> |
+| VL24 | vLLM V1 BlockPool · 重新分配、解除固定、可写判定与释放（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/core/block_pool.py#L681-L824> |
+| VL25 | vLLM · NIXL KV Cache Lease：跨实例块固定、续约、完成与超时回收（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/design/nixl_kv_cache_lease.md> |
+| DS18 | DeepInfer · BlockManagerMutexAcquire 与 block/state 联合准入（固定提交） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/csrc/engine/block_manager.hpp#L190-L240> |
+| DS19 | DeepInfer · CacheEngine：层所有权、SWA 与压缩状态的物理布局（固定提交） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/deepinfer/worker/cache_engine.py#L149-L305> |

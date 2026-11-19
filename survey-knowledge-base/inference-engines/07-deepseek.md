@@ -78,6 +78,35 @@ Q&A 用一张表说明 KV 放在哪里：
 
 开源引擎内部的 KV 管理相当简单。`csrc/engine/block_manager.hpp` 的 `Blocks` 用数组内嵌的 `prev` / `next` 维护空闲链表，块按 `ref_count` 管理：`allocate()` 从链表头取块，`free()` 在引用计数归零后放回链表尾；`BlockManager.free_blocks_nolock()` 逆序释放，`pin_block()` 供 fork 出的序列共享父序列的块。每个序列另从 state 管理器分得一个 state 槽位存放 SWA 等状态 [DS3]。与 vLLM、SGLang 不同，这里**没有 GPU 内的前缀哈希表**，块释放后也不保留可命中的内容。前缀复用全部交给外部的 kvcache-store 与 3FS，引擎只需知道某个序列已有多少 token 算好（`num_cached_tokens`），然后把命中部分装入分配好的块 [DS3][DS2]。
 
+### 内存系统管理：分页 KV、序列状态与跨请求恢复
+
+DeepInfer V4.1 Flash 同时管理按上下文长度增长的 block KV，以及每个活动序列独占的 state 槽。两类对象的索引、增长方式与可恢复性不同。开源核心能核查设备侧分配与布局；跨机目录、持久缓存和线上回收策略的证据来自 DeepSeek 部署 Q&A。 [DS18][DS19][DS2]
+
+
+#### 请求准入必须同时拿到两种资源
+
+开源块管理器的 try_allocate_seq 在同一临界区里检查两项条件：block 池能否满足本请求所需页数，启用 state 管理器时能否取得一个序列槽。两者都满足才写入序列的 block_table 和 state_id；暂时资源不足则返回等待，永远超过块池可支持范围则报错。已分配块用引用计数保护，解除最后一个引用后回到空闲链表。由此可以解释一种仅看“剩余 KV 页数”无法诊断的现象：即便还有空页，活动序列已占满 state 槽时，新请求仍不能准入。 [DS18]
+
+
+#### 同一请求里，哪些字节应该占用哪一级内存
+
+
+| 对象 | 设备侧组织 | 跨请求保存与恢复 |
+| --- | --- | --- |
+| 分页 block KV | 按块索引存放压缩 attention KV 和相应的 indexer K。共享 KV 的消费层映射到拥有数据的源层；容量核算须按实际拥有缓存的层计数。 | 3FS 保存分页数据。入口先对前缀做元数据匹配，再异步取入主机共享内存，逐层送入 HBM。有效 block KV 可在 SWA 状态缺失时继续复用。 [DS19][DS2] |
+| 每序列的 SWA 窗口 | state 槽前段放跨请求恢复所需的 SWA。Decode 在跨过指定边界时把当前窗口复制到设备端副本区，请求结束时取最近完成的快照。 | 官方披露 V4.1 每序列保存段为 1,415,040 B（20 层 × 134 token × 528 B）。保存段以单副本留在产生它的机器的主机内存，由入口目录定位；跨机命中经 400G VLAN 拉回。源码名 state_size_to_disk 在这条线上并不代表写入 3FS。 [DS19][DS2] |
+| 消费层窗口与压缩中间状态 | 运行时仍需设备内存。布局把可省略部分放在 state 槽后段，P→D 交接与跨请求保存分别选择所需区域。 | YOCO 消费层的窗口可由 prefill 重建；压缩状态在与存储粒度对齐的边界处无跨界依赖。因此，整槽字节数不能作为每次缓存保存的写入量。 [DS19][DS2] |
+
+
+#### 为什么丢失窗口后仍能复用较长的 block KV
+
+部署 Q&A 把两次查找分开：先按 128-token 粒度确定 block KV 的可命中前缀，再查相应边界附近的 SWA 快照。窗口缺失时回退一个块，对末尾 128 个 token 做有界重放以重建近似的 SWA 状态；已命中的 block KV 保留，重放不覆盖它。这使单副本主机状态的丢失可局部恢复，代价落在请求的额外 prefill。此处的重放窗口和近似恢复属于该版本模型的实现。 [DS2]
+
+
+#### 缓存跨越进程生命周期后，如何判定旧字节还有没有效
+
+DeepSeek 用部署配置、模型权重和用户组共同标识兼容域。权重、块字节布局、tokenizer，或任何会改变 KV 数值的框架更新，都可能让旧条目失去复用资格；团队披露线上未做缓存格式迁移。Decode 异步写回失败不回报给引擎，读入时严格校验。3FS 每个存储节点运行 GC Worker，按水位回收最久未使用的数据；kvcache-store 自身没有独立到期逻辑。因此要区分三个事件：当前 API 请求生成结束、后台产生可被复用的副本、旧副本最终被回收。 [DS2]
+
 ### 命中判定、计费与线上命中率
 
 对 API 用户而言，规则经历过一次变化。2024-08-02 硬盘缓存上线时，公告写明：只有从第 0 个 token 起相同的前缀才算重复；缓存以 **64 token** 为一个存储单元，不足 64 token 的内容不缓存；缓存“尽力而为”，不保证 100% 命中；不再使用的缓存一般在几小时到几天内自动清空；每个用户的缓存逻辑上相互隔离。当时命中价格为 0.1 元 / 百万 tokens，未命中为 1 元；128K 输入且大部分重复的请求，实测首 token 延迟从 13 秒降到 500 毫秒 [DS7]。现行的“上下文硬盘缓存”指南不再提 64 token，而是说“受 Sliding Window Attention 机制的影响”，每条缓存前缀是一个独立的完整单元，后续请求必须**完整匹配**某个“缓存前缀单元”才能命中。落盘时机有三种：请求结束位置（用户输入末尾、模型输出末尾各产生一个单元）、系统检测到的公共前缀，以及长输入 / 长输出中按固定 token 间隔截取。缓存构建耗时为秒级，命中情况通过 `usage` 中的 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` 返回 [DS6]。现行价格页上，`deepseek-flash`（DeepSeek-V4.1-Flash-1017）高峰时段输入命中 0.04 元、未命中 2 元 / 百万 tokens，命中价为未命中价的 2%；`deepseek-v4-pro` 为 0.30 元对 9.0 元。空闲时段价格减半，缓存存储本身不另收费 [DS8][DS7]。
@@ -108,3 +137,5 @@ Q&A 用一张表说明 KV 放在哪里：
 - **[DS15]** [DeepSeek-AI · DeepSeek-V3 Technical Report（arXiv:2412.19437，2024-12；§3.4 推理与部署）](https://arxiv.org/abs/2412.19437)
 - **[DS16]** [DeepSeek 官方 Hugging Face · deepseek-ai/DeepSeek-V3 config.json（kv_lora_rank、qk_rope_head_dim、num_hidden_layers 等，采集于 2026-11-18）](https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json)
 - **[DS17]** [DeepInfer · LLMEngine：请求接入、C++ 调度、Worker 执行与结果处理（固定提交）](https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/deepinfer/engine/llm_engine.py)
+- **[DS18]** [DeepInfer · BlockManagerMutexAcquire 与 block/state 联合准入（固定提交）](https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/csrc/engine/block_manager.hpp#L190-L240)
+- **[DS19]** [DeepInfer · CacheEngine：层所有权、SWA 与压缩状态的物理布局（固定提交）](https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/deepinfer/worker/cache_engine.py#L149-L305)

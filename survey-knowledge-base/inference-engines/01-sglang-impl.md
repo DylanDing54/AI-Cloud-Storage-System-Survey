@@ -100,6 +100,34 @@ SGLang 用两级间接寻址实现前缀共享。第一级是 `ReqToTokenPool.re
 
 **L3→L2 预取，以及预取 token 的记账。**请求入队时，`Scheduler._add_request_to_queue` 调用 `_prefetch_kvcache`：先在本地匹配，如果最后命中的节点已经备份或者就是根节点，就把剩余 token 交给 `prefetch_from_storage`。剩余长度小于 `prefetch_threshold`（默认 256）或触发限速时不发起预取 [SGI7][SGI12][SGD]。控制器里有三个后台线程分工处理：`prefetch_thread_func` 计算页哈希，分批调用 `batch_exists`，遇到第一个缺页就停，再用 `all_reduce(MIN)` 让各 TP rank 得到相同的命中数；`prefetch_io_aux_func` 在 `_page_transfer` 中分批读入主机池，每批产生一个带 `completed_tokens` 的 `PrefetchAck`；`prefetch_sync_thread` 对这些进度再做跨 rank 归约 [SGI14]。调度器构建 prefill 批次时，对每个请求调用 `check_prefetch_progress`：`best_effort` 立即终止预取；`wait_complete` 一直等到完成；`timeout`（默认）计算截止时间，超时后由各 rank 投票终止 [SGI12][SGI9]。终止后 `_handle_prefetch_result` 只认已完成的 `host_indices[:completed_tokens]`，用 `insert_host` 把它们作为“仅 L2”节点挂到树上，已在树中的重复部分释放回主机池，其余 token 交给后续 prefill 重算；`prefetch_tokens_occupied` 和 `prefetch_loaded_tokens_by_reqid` 分别记录在途占用和每个请求实际从 L3 拿到的 token 数 [SGI12]。L2→L3 方向由 `write_storage` → `backup_queue` → `backup_thread_func` 完成，每批调用一次 `batch_set` 或 `batch_set_v1`；设计文档还说明只会传输 L3 中尚不存在的数据 [SGI14][SGD]。
 
+### 内存系统管理：同一个前缀在多个 rank 上怎样保持可用
+
+在 SGLang 的上下文并行（CP）实现里，命中一条前缀只解决了逻辑寻址。注意力计算还要知道每页由哪个 rank 持有、本地设备页是否已恢复、拼出当前层所需的临时缓冲是否够用。流水并行（PP）进一步要求各阶段就可复用的前缀长度达成一致。项目组在 2026 年 11 月公开了这些协议及相应实现。 [SGI34]
+
+
+#### 容量预算：主机池还要容纳哪些状态
+
+固定提交中的 HiCache 自动定容会遍历设备池的各个子池。除了 token KV，还会计入请求持有的循环状态，以及跟随目标模型槽位分配的草稿模型缓存。草稿设备池比目标池小时，主机端仍需按目标槽位数计算所需镜像。自动模式按主机分配器可用的普通页或大页预算压低缓存比例，另留 5% 余量给页取整、分配器元数据和暂存空间。各 rank 在建池前通过 CPU 通信组取可行比例的最小值，避免某个阶段先按较大容量建池、另一个阶段随后分配失败。显式指定容量或比例时，走不同的配置路径。 [SGI35]
+
+
+#### 一页 KV 的归属、回填与可读时刻
+
+
+| 操作 | 分配器与缓存树记录什么 | 何时可以继续 |
+| --- | --- | --- |
+| 匹配与扩展 | CP 各 rank 保留同一套逻辑页号；每页按页号对分片数取模确定所有者。设备池把逻辑槽翻译成所有者本地地址。共享前缀分叉后，新页延续原先的所有者轮转顺序。 | 插入路径要检验所有者轮转是否兼容，防止两条逻辑前缀拼接后落到错误设备。 |
+| 从主机恢复 | 各 rank 只备份和恢复自己持有的页。回填可以取得新的本地物理地址，但页的逻辑所有者必须一致。 | 某层的传输完成事件到达后，gather 流才可读该层；注意力还要等待该层 gather 完成。 |
+| 执行注意力 | 每个 rank 提供自己持有的历史页，逐层 all-gather 到临时缓冲。页表把按所有者排列的缓冲解释为原序列顺序，省去一次物理重排。 | 两块临时缓冲在相邻层交替使用。调度器先为 gather 预留显存，再接纳批次；只按树中的常驻页统计会漏掉这项开销。 |
+
+上述页所有权与完成事件对应项目组披露的页分片路径。普通单卡前缀命中无需执行跨 rank 的 gather。 [SGI34]
+
+
+#### 流水阶段何时可以解锁、淘汰或停止预取
+
+各 PP 阶段只保存本阶段负责的层，其 GPU–主机拷贝会先后完成。若每个阶段一看到本地事件完成就解锁，后续请求可能在一个阶段淘汰前缀，在另一个阶段仍复用它。SGLang 让首个 PP 阶段汇总本 TP 组可消费的完成通知数，并沿流水线传递；各阶段按相同顺序处理同样多的通知，更新账目之前仍等待各自的本地完成事件。外部存储读取还要取各 rank 共有的命中和完成长度，因此局部多读到的页不能单方面延长本轮前缀。 [SGI34]
+
+**线上案例。**讯飞星火 MaaS 团队在 SGLang 项目文章中披露，GLM-5.1/5.2 CodingPlan 同时使用 PP、P/D 分离与多 token 预测，输入通常为 3 万至 20 万 token。团队报告接入带外部存储的 HiCache 后，命中率由约 30% 升至 95%，首 token 延迟中位数低于 3 秒。该案例说明多阶段状态一致性服务于真实的长前缀负载；文章未给出单独启停页分片、PP 同步或某款存储设备的对照，因而不能把收益拆分给其中某一项。 [SGI34]
+
 ### 关键参数与内置常量一览
 
 下表列出前面提到的开关和阈值在固定提交中的默认值。前八行是命令行参数，后几行是写在源码里的常量或内部阈值，不能通过命令行直接修改（个别可通过环境变量或 `--hicache-storage-backend-extra-config` 调整）。
@@ -156,3 +184,5 @@ SGLang 用两级间接寻址实现前缀共享。第一级是 `ReqToTokenPool.re
 - **[SGI31]** [SGLang · TP Worker 与 ModelRunner 执行入口（固定提交）](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers/tp_worker.py)
 - **[SGI32]** [SGLang · P/D disaggregation：传输后端、设备选择与部署拓扑（固定提交）](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/docs/docs/advanced_features/pd_disaggregation.mdx)
 - **[SGI33]** [SGLang · HiCache：各层可见性、数据布局、I/O 内核与多 rank 同步（固定提交）](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/docs/docs/advanced_features/hicache_design.mdx)
+- **[SGI34]** [LMSYS / SGLang · HiCache Across Multi-Parallelism and Distributed Serving，2026-11-02](https://lmsys.org/blog/2026-11-02-hicache-distributed-serving/)
+- **[SGI35]** [SGLang · HiCache host pool 自动定容与跨 rank 最小值（固定提交）](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/mem_cache/hicache_auto_size.py#L60-L152)

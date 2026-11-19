@@ -56,6 +56,37 @@ vLLM V1 的 APC 采用哈希方案：每个 KV 块的键由**父块哈希、本�
 
 块大小方面，固定提交中 `CacheConfig.DEFAULT_BLOCK_SIZE = 64`。用户没有指定 `--block-size` 时，平台层会在各注意力后端都支持的取值里另选一个首选值。另有 `prefix_match_unit`（即 `hash_block_size`），可以让前缀命中落在比物理块更细的边界上 [VL14]。vLLM 博客在 2026-01-08 写的是“默认每块 16 token”，说明默认值在此后已经变化，做容量估算时应以实际运行日志为准 [VL5]。
 
+### 内存系统管理：显存预算、块所有权与跨设备借用
+
+vLLM 在三个时刻回答不同的问题：启动时给 KV 留多少 HBM；一次请求结束后，其块能否被读、被写或被重新分配；跨实例读取尚未完成时，源端要把显存保留到什么时候。只看 GPU 上的已分配字节，无法区分这些状态。
+
+
+#### 启动时如何划出 KV 池
+
+V1 GPU Worker 的自动定容路径先取得设备内存快照，通过模型执行器做一次 profile，计入模型权重以及非 KV 的峰值消耗；启用相应估算时，还要扣掉 CUDA Graph 的内存。所得余额才作为 KV 容量返回。实现对 profile 期间临时张量的分配也做了处理：MoE 工作区逐级扩张时，小分配可能占住已释放的大段，使整段显存无法退回并被误算为常驻开销；源码临时限制分配器拆分大块，测量结束后恢复设置。显式指定 KV 字节数则走单独分支。由此，同型号 GPU 装载同一模型，执行图、工作区和启动配置不同，也可能得到不同的池大小。 [VL23]
+
+
+#### 释放、可命中、可覆盖是三个不同的时刻
+
+
+| BlockPool 中的状态 | 下一次可做的操作 | 源码里的约束 |
+| --- | --- | --- |
+| 活动请求独占的新块 | 继续写入本请求的 KV。 | 可写判定要求块有效、引用计数为一、尚无已发布的块哈希。独占一个已发布的前缀仍不足以原地改写。 |
+| 完整前缀最后一个引用释放 | 块进入空闲队列；复用相同前缀仍可能命中原内容。 | 命中时 touch 将零引用块从空闲队列摘除并增加引用。这里的“空闲”表示可以重新分配，统计上可能与“仍可命中”重叠。 |
+| 分配器把旧 ID 交给新请求 | 从空闲队列取块，撤销旧缓存映射，再取得本次引用。 | 对于已解除固定且登记了复用回调的块，重新分配前先通知原读者。保存一个 block ID 本身不能延长其内容的有效期。 |
+
+这三个状态直接来自固定提交的 BlockPool。它们解释了为什么监控“前缀命中率”与“还能分配多少块”必须使用两套计数。 [VL24]
+
+
+#### 逻辑页大小不变，物理搬运粒度为何会变化
+
+vLLM 团队公开对比了 0.11.0 与 0.12.0 的卸载布局。在其 Llama-3.1-8B-Instruct 配置中，同为 16-token 逻辑块，旧布局按层分散，表中单次连续片段为 32 KB；跨层合并布局对应 2 MB 的连续物理块。同一个前缀从主机 DRAM 回填时，拷贝引擎处理的片段数量因此改变。团队还对比了设备 DMA 和占用 SM 的拷贝内核：该 8B 模型下，DMA 在 TTFT 相当时，吞吐最高比自定义内核高 32%。实验条件为单张 H100 80 GB HBM3、500 GB 主机 DRAM、Xeon Sapphire Rapids（容器限 8 核）、FlashAttention，关闭 GPU 前缀缓存以隔离 CPU 命中；这些数字属于 CPU–GPU 实验。 [VL5]
+
+
+#### 远端读者如何影响本地显存的回收
+
+NIXL 的 P/D 拉取路径中，Prefill 完成后 P 仍持有源 GPU 块，因为 D 可能还在排队。官方设计将所有权延伸到传输完成：P 按请求授予租约，D 从进入调度器时就开始跟踪并续约；收到读完成通知，P 可以立即释放；D 崩溃并停止续约，P 才在租约到期后回收。文档默认初始租期 30 秒，心跳随前向循环处理。这样既避免 D 排队时被提前覆盖，也限制故障请求长期占住 HBM。反向保留 Decode 块等待下一轮对话采用另一套固定 TTL，不能套用这项按请求续约的语义。 [VL25]
+
 ### KV Connector API：调度侧与 Worker 侧
 
 同一个 connector 类会被实例化两次：调度进程里一份（`KVConnectorRole.SCHEDULER`），每个 GPU worker 里各一份（`KVConnectorRole.WORKER`）。两边通过 `SchedulerOutput.kv_connector_metadata` 和回传的 `KVConnectorOutput` 交换信息 [VL4][VL7]。调度侧的核心钩子是 `get_num_new_matched_tokens(request, num_computed_tokens)`。它返回两个值：外部缓存还能在本地命中之外补上多少 token，以及是否异步加载。文档要求这个方法可以被重复调用、没有副作用，而且只能把当下确实可加载的前缀算进去。返回 `None` 表示 connector 还没查完，调度器会对该请求执行 `skip_request()`，下一步再问 [VL7][VL8]。之后的顺序是：`allocate_slots(..., num_external_computed_tokens)` 分配块，`update_state_after_alloc()` 记录本次加载计划；如果是异步加载，请求状态置为 `WAITING_FOR_REMOTE_KVS`；最后由 `build_connector_meta()` 打包本步的 load/save 元数据。Worker 侧依次执行 `bind_connector_metadata()`、`handle_preemptions()`、`start_load_kv()`，并在逐层前向中调用 `wait_for_layer_load()` 和 `save_kv_layer()`；前向结束后，`wait_for_save()`、`get_finished()` / `get_transfer_results()`、`get_block_ids_with_load_errors()` 把完成情况和失败的块回报给调度器 [VL7]。
@@ -90,3 +121,6 @@ vLLM V1 的 APC 采用哈希方案：每个 KV 块的键由**父块哈希、本�
 - **[VL20]** [vLLM V1 · EngineCore.step 与 step_with_batch_queue（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/engine/core.py)
 - **[VL21]** [vLLM · 并行扩展、多节点通信与 GPUDirect RDMA 验证（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/serving/parallelism_scaling.md)
 - **[VL22]** [vLLM · NixlConnector：侧通道、UCX、设备选择及 P/D 读取方向（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/features/nixl_connector_usage.md)
+- **[VL23]** [vLLM V1 GPU Worker · determine_available_memory 与显存 profile（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/worker/gpu_worker.py#L716-L826)
+- **[VL24]** [vLLM V1 BlockPool · 重新分配、解除固定、可写判定与释放（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/core/block_pool.py#L681-L824)
+- **[VL25]** [vLLM · NIXL KV Cache Lease：跨实例块固定、续约、完成与超时回收（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/design/nixl_kv_cache_lease.md)
