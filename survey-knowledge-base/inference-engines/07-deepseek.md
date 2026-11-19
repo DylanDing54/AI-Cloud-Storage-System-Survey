@@ -84,7 +84,7 @@ Q&A 用一张表说明 KV 放在哪里：
 
 引擎侧的判定规则解释了“完整单元”的由来。Q&A 写明：命中长度由 block KV 决定，最后一块是否需要重算由 SWA KV 决定。对长度为 L 的输入，命中上限为 L − 134（128 窗口 + 6 个推测回退位置）。先查 block KV，得到 128 的整数倍 L1；再查 SWA KV，若 [L1 − 128, L1] 内存在 SWA 快照则命中 L1，否则回退为 L1 − 128。SWA 只在 128 token 整数倍处保存；prefill 只在最后一个 chunk 保存，decode 每跨过一个 128 边界就在显存中复制一次窗口 [DS2]。缺失的 SWA 用“SWA bounded replay”补：只重算命中前缀末尾的 128 token，重算代价与上下文长度和层数无关，block KV 原样复用 [DS2][DS1]。缓存兼容性以“(部署配置, 模型权重, 用户组)”为键，权重、块字节布局、tokenizer 的变化，或改变 KV 数值的框架改动，都会使旧缓存失效；生产中没有做过缓存格式迁移 [DS2]。
 
-![DeepSeek 硬盘缓存的命中判定：上半部分为 API 文档的规则（2024-08 的 64 token 存储单元 → 现行“缓存前缀单元”的三种落盘时机），下半部分为 DeepInfer Q&A 描述的两段式查询（block KV 得 L1，SWA 决定 L1 或 L1−128）与 bounded replay（本文根据 DeepSeek 官方资料绘制：API 指南、2024-08-02 公告、DeepInfer 部署 Q&A）](../figures/deepseek-6.svg)
+![DeepSeek 硬盘缓存的命中判定：上半部分为 API 文档的规则（2024-08 的 64 token 存储单元 → 现行“缓存前缀单元”的三种落盘时机），下半部分为 DeepInfer Q&A 描述的两段式查询（block KV 得 L1，SWA 决定 L1 或 L1−128）与 bounded replay（本文根据 DeepSeek 官方资料绘制：API 指南、2024-08-02 公告、DeepInfer 部署 Q&A）](../figures/deepseek-5.svg)
 
 *DeepSeek 硬盘缓存的命中判定：上半部分为 API 文档的规则（2024-08 的 64 token 存储单元 → 现行“缓存前缀单元”的三种落盘时机），下半部分为 DeepInfer Q&A 描述的两段式查询（block KV 得 L1，SWA 决定 L1 或 L1−128）与 bounded replay（本文根据 DeepSeek 官方资料绘制：API 指南、2024-08-02 公告、DeepInfer 部署 Q&A）* — [原始来源](https://api-docs.deepseek.com/zh-cn/guides/kv_cache)
 

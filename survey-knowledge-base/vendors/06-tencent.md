@@ -29,7 +29,7 @@ TACO-LLM 则早于 FlexKV：腾讯云计算产品团队在 2023-11-17 发布的�
 README 把 FlexKV 划分为三个核心模块 [F][TX1]：
 
 - **StorageEngine（存储引擎）**：按配置初始化三级缓存；把请求的多个 token 组成一个 block，以 block 为单位存放 KV，保持与 GPU 显存中一致的 KV 形状，物理偏移由 block ID 计算。可启用 *block-wise 模式*，把多个层以及 K/V 的缓存合并为更大的 block，以增大 I/O 单位、加快传输。配置层面，CPU / SSD / REMOTE / GDS 的布局均可在 `LAYERFIRST` 与 `BLOCKFIRST` 间选择，默认且推荐 `BLOCKFIRST` [TX4]。
-- **GlobalCacheEngine（控制面）**：决定传输方向及源 / 目的 block ID；包含用于前缀匹配（match / insert）的 **RadixTree** 和跟踪空间占用、触发淘汰的 **mempool**。新请求到达时，它比较三级存储各自匹配到的 token 数，决定从 SSD 或可扩展存储取哪些 block，经 CPU 内存中转送往 GPU。
+- **GlobalCacheEngine（控制面）**：决定传输方向及源 / 目的 block ID；包含用于前缀匹配（match / insert）的 **RadixTree** 和跟踪空间占用、触发淘汰的 **mempool**。新请求到达时，它比较三级存储各自匹配到的 token 数，决定从 SSD 或可扩展存储取哪些 block，经 CPU 内存中转送往 GPU（启用 GDS 时 SSD 段直接读入 GPU，不经 CPU 中转 [PLTX1]）。
 - **TransferEngine（数据面）**：执行控制面下发的搬运；每个进程用多线程并行传输，并使用 io_uring 等高性能 I/O 机制。
 
 接口层面，*get* 可异步调用，匹配与传输时间可通过预取与前序计算重叠；*put* 也可异步调用，GPU→CPU 拷贝与后续计算重叠，而 CPU、SSD、可扩展存储之间的搬运完全由 TransferEngine 异步完成，对主进程透明 [F]。2025 年 11 月起 FlexKV 由 client-server 模式改为可直接调用的库（v1.0.0 API），以减少进程间通信开销 [F][TX5]。
@@ -44,9 +44,9 @@ FlexKV 只管理 GPU 之下的层级，GPU KV 仍由推理引擎管理，不在�
 
 - **近似 inclusive / write-through**：*put* 时数据先写入 CPU 缓存；若 SSD 或远端存储启用且可用，再把对应层尚未命中的 block 补写下去，因此同一 KV block 通常在多层各有副本。
 - **驱逐不触发下沉**：某层驱逐只从该层的 Radix Tree 移除 block 并回收空间，不触发写回、迁移或额外传输；CPU 层驱逐不会主动发起 CPU→SSD 传输。README 称之为“逻辑 LRU 淘汰，不触发物理数据移动” [F]。
-- **尽力而为**：下层未启用、被跳过、空间不足或传输失败时可能没有副本，上层驱逐后只能从其他层命中或未命中。
+- **尽力而为**：下层未启用、被跳过、空间不足或传输失败时可能没有副本，上层驱逐后只能从其他层命中或未命中。源码中的细节是：仅有 CPU/SSD 时，若 SSD 腾不出所需 block，本次 put 整体放弃（CPU 也不写）；启用远端层时，SSD 分配失败只跳过 SSD 副本 [PLTX1]。
 
-可选策略有 `lru`（默认）、`lfu`、`slru`、`fifo`、`mru`、`filo`。驱逐在两种情况下触发：利用率达到 `evict_start_threshold`（默认 1.0），或当前请求所需 block 数大于空闲 block 数；实际驱逐量取“满足请求的最少块数”“降回阈值以下所需块数”“`evict_ratio` × 总块数”三者最大值。`hit_reward_seconds` 为 LRU 增加命中奖励，每次命中把有效访问时间后推若干秒；SLRU 以 `slru_protected_threshold`（默认 2 次命中）划分试用段与保护段，文档称其可抵抗一次性请求造成的缓存扫描污染 [TX3]。
+可选策略有 `lru`（默认）、`lfu`、`slru`、`fifo`、`mru`、`filo`。驱逐在两种情况下触发：利用率达到 `evict_start_threshold`（默认 1.0），或当前请求所需 block 数大于空闲 block 数；实际驱逐量取“满足请求的最少块数”“降回阈值以下所需块数”“`evict_ratio` × 总块数”（默认 0，即不设最小批量）三者最大值。`hit_reward_seconds` 为 LRU 增加命中奖励，每次命中把有效访问时间后推若干秒；SLRU 以 `slru_protected_threshold`（默认 2 次命中）划分试用段与保护段，文档称其可抵抗一次性请求造成的缓存扫描污染 [TX3]。
 
 | 配置项（文件 / 环境变量） | 默认值 | 含义（据官方配置指南） |
 |---|---|---|
@@ -118,17 +118,68 @@ TACO-LLM 官方文档“Auto Prefix Caching”一节（更新于 2025-04-17）�
 
 FlexKV 仓库自身没有给出基准数字。README 对仍在评审中的缓存恢复优化（#323）明确说明，CPU / mock 生命周期测试与 CUDA 字节测试各有范围，模型输出一致性、跨机性能与持续容量需要单独验证 [F][TX11]。
 
+### 放置策略：哪些 KV 放到哪一层
+
+以下按 FlexKV 官方文档与固定提交 `542b11c`（main 分支，2026-11-16）的源码逐项核对。FlexKV 只管 GPU 之下的层级，GPU 内哪些前缀保留由推理引擎决定。TACO-LLM 的 GPU→CPU 卸载见上文，不在此表内。
+
+| 维度 | FlexKV 做法 | 证据类型与引用 |
+|---|---|---|
+| 层级与介质 | GPU（引擎管理）→ CPU 内存 → 本地 SSD（可多盘、可 GDS）→ 远端层（第三方存储 / PCFS，或 Mooncake Store）；另有同层的 P2P 对等节点 CPU/SSD。容量由 `cpu_cache_gb`（默认 16）和 `ssd_cache_gb`（默认 0，即关闭）设定，启用时必须大于 CPU 层；远端容量由外部存储决定 | 源码可见 / 官方明确说明 [PLTX3][TX4] |
+| 放置单位 | block，`tokens_per_block` 取引擎页大小（配置默认 16）；block 字节数等于单 token KV 字节数 × `tokens_per_block`；索引以 block 哈希链组成 RadixTree 前缀 | 源码可见 [PLTX3] |
+| 准入 | 无热度门槛：vLLM 适配器在请求正常结束（STOP / LENGTH）时，把 `all_token_ids` 中满块部分全部 put，**包括 decode 输出 KV**；只写尚未命中的 block（`_need_to_put` 仅判断未命中数大于 0），最后不满一块的尾部不写。中止的请求默认不写 | 源码可见 [PLTX2] |
+| 写入时机 | put 时 GPU→CPU（D2H），CPU 段完成后即可读；再从 CPU 异步写 SSD（H2DISK）和远端层，即近似 inclusive 的 write-through，多层各有副本；Mooncake Store 按已命中前缀去重，避免重复写入 | 官方明确说明 + 源码可见 [TX3][PLTX1] |
+| 降级与淘汰 | 每层独立：`take()` 在利用率 ≥ `evict_start_threshold` 或空闲块不足时，从 RadixTree 中淘汰未加锁的叶子节点，块归还 mempool；默认策略 `lru`，可选 lfu / slru / fifo / mru / filo；驱逐不下沉、不迁移 | 源码可见 / 官方明确说明 [PLTX1][TX3] |
+| 提升与预取 | get 时 CPU 命中段直接 H2D；SSD 多出的段读入新分配的 CPU block，完成后挂到 CPU 树上（即提升到 CPU），GDS 时直读 GPU；远端段经 CPU 读入，若 SSD 前缀连续，还会补写到 SSD。Mooncake 远端读**只在预取中执行**，计算路径的 get 强制 `ignore_remote`，没取回的部分由引擎重算；预取有 `wait_complete` / `timeout` / `best_effort` 三种策略 | 源码可见 [PLTX1][PLTX4] |
+| 位置选择 | 单机内多实例共享一套 CPU/SSD；启用 P2P 时，每层同时匹配本地索引和分布式快照，取较长前缀，相等时优先本地，两者不拼接；实例级路由交给 Dynamo KV router 等上层组件 | 源码可见 / 官方明确说明 [PLTX5][TX10][TX13] |
+| 决策者 | 引擎连接器决定何时 get / put；GlobalCacheEngine 决定读哪层、写哪层；用户侧只有 `namespace` 隔离与 `CacheStrategy`（`ignore_ssd` / `ignore_remote` 等），没有 TTL 或断点 | 源码可见 / 官方明确说明 [PLTX1] |
+| 选择依据 | 固定层序（CPU 优先，其次 SSD、远端）加最长前缀匹配；不估算复用概率，也不比较加载代价与重算代价，没有显式成本模型 | 源码可见；成本模型未公开（未发现） [PLTX1] |
+
+**选择逻辑。**FlexKV 的放置规则可以概括为“全写、逐层副本、各层独立 LRU”。它不在写入时判断哪些 KV 值得保留，而是把每个结束请求的全部满块（包括输出）写进 CPU，并在启用时同步写到 SSD 和远端层，由各层容量和淘汰算法筛出热数据。这样实现简单，命中路径也短：任意一层驱逐都不需要数据搬迁，下层通常已有副本。代价是写放大，SSD 写入量约等于所有未命中 put 的总量。官方提供的调节手段在淘汰侧，例如 `slru` 防扫描、`hit_reward_seconds` 奖励命中，而不在准入侧。
+
+读路径按层序拼接前缀：GPU 已有部分跳过；CPU 能接上的段为 fragment1；SSD 比 CPU 更长的部分为 fragment2；远端再长的部分为 fragment3。下层命中的 block 会经 CPU 中转并挂到 CPU 树上，所以“被读到”本身就是一次提升，SSD 也会通过远端读顺带回填。Mooncake 远端读被限制在预取阶段，原因是跨节点读取时延不确定；计算路径不等待远端，未取回的部分直接由引擎重算，取舍偏向保 TTFT。
+
+**例子（本文按源码推演，数值为估算）。**以官方 vLLM 示例的 Qwen3-32B（64 层、8 个 KV 头、head_dim 128、BF16 [PLTX6]）为例，单 token 的 KV 为 2×64×8×128×2 B = 256 KiB，16 token 的 block 约 4 MiB。32k token 的多轮对话前缀约 2048 个 block、8 GiB。第一轮结束时，这 8 GiB 写入 CPU 层（示例 32 GB），并异步写入 SSD（示例 1 TB）。下一轮到达时，若 GPU 中仍有该前缀，只需补算新增部分；若已被 GPU 驱逐，则从 CPU 读回。如果 CPU 层被其他会话挤满，该前缀的叶子按 LRU 先被淘汰，此时 SSD 副本仍在，读回时会重新提升到 CPU。只有 SSD 也被淘汰、又没有远端副本时，才需要整段重算。
+
+### 硬件配置信息
+
+下表列出本章所读腾讯官方资料和 FlexKV 仓库文档中给出的硬件或容量配置。开源文档多为“示例配置”，而非性能测试平台；所有资料都没有提到腾讯云实例规格名。
+
+| 场景 / 方案 | 计算（GPU / NPU 型号 × 数量，HBM 容量） | CPU 与主机内存（DRAM 容量） | 本地存储（SSD / NVMe / HDD 型号、数量、容量） | 网络（RDMA / NIC 型号与带宽） | 远端 / 共享存储（服务名与规格） | 来源 |
+|---|---|---|---|---|---|---|
+| FlexKV × vLLM 官方示例（Qwen3-32B，TP=8） | 8 卡（型号、HBM 未公开） | FlexKV CPU 层 32 GB；主机内存总量未公开 | SSD 层 1024 GB，分布在 `/data0`、`/data1` 两个挂载目录；型号未公开 | 未公开 | 未启用 | [TX5] |
+| FlexKV × TensorRT-LLM 官方示例 | 未公开 | CPU 层 32 GB | SSD 层 1024 GB，两个挂载目录；型号未公开 | 未公开 | 未启用 | [TX7] |
+| FlexKV × Dynamo 多 worker 示例 | 4 个 worker × TP=2，共 8 卡（型号未公开） | 每个 worker 的 CPU 层 32 GB | 每个 worker 的 SSD 层 128 GB（`/data/flexkv_ssd/worker_i`）；型号未公开 | 未公开（KV 事件经 ZMQ TCP 发布） | 未启用 | [PLTX8] |
+| GDS 配置示例 | 未公开 | CPU 层 32 GB | SSD 层 1024 GB；挂载示例为 `/dev/nvme0n1`（ext4，`data=ordered`），型号未公开 | 未公开 | 未启用 | [TX9] |
+| 分布式 KV 复用基准配置（P2P CPU） | 合成 4 层模型，TP=1（GPU 型号未公开） | CPU 层 4 GB | SSD 关闭（0） | Mooncake Transfer Engine，`rdma` 协议，网卡 `mlx5_0,mlx5_1,mlx5_4,mlx5_5`（带宽未公开） | Redis 作元数据存储（规格未公开） | [PLTX10][TX8] |
+| radixshmem 多机集群示例（4 节点） | 未公开 | 每节点 `radix-server --data-bytes 1024G` 主机内存作 CPU 层 | 该模式必须关闭 SSD 层 | 控制面 `mlx5_bond_0`，数据面 `mlx5_0`–`mlx5_7` 共 8 张网卡（带宽未公开） | etcd 协调（规格未公开） | [PLTX7] |
+| Gemma4 31B 支持复现 | 2 卡，“2×A100-80G 或类似配置”（约需 60 GB 显存） | 未公开 | 未公开 | 未公开 | 未公开 | [PLTX9] |
+| TACO-LLM 发布测试（WizardCoder-15B） | A100-80G × 1 | 未公开 | 未公开 | 未公开 | 未公开 | [TX15] |
+| TACO-LLM Prefix Cache Offload | 未公开 | KV 卸载占机器总内存的比例，默认 0.3，按卡均分 | 不涉及 | 未公开 | 不涉及 | [TX14] |
+| Phison 实测 / 2026 官方稿件性能数据 | 未公开 | 未公开 | 未公开 | 未公开 | 未公开 | [TX1][TX2] |
+
+这些配置中，KV 实际落在 GPU HBM（引擎管理）、主机 DRAM（FlexKV CPU 层或 radixshmem SlotStore）和本地 NVMe SSD 上；跨节点复用依靠 RDMA 网卡读取对端 DRAM，或使用 Mooncake Store。所有来源都没有给出 SSD 型号或整机规格（GPU 型号只有 TACO-LLM 与 Gemma4 文档写明为 A100-80G），也没有任何 HDD 配置。
+
 ### 与 SSD / HDD 多级存储的关系（本文分析）
 
-FlexKV 是本报告所调研的云厂商方案中，把 SSD 作为常规缓存层写进默认配置示例最直接的一个：block 级布局、block-wise 合并大 I/O、io_uring 队列深度 512、多 SSD 目录并行和 GDS 都针对顺序性较好的大块读写设计，异步 put 与 write-through 让下沉写入不阻塞推理。“驱逐不触发下沉”的语义意味着慢层的数据是 put 时就写入的副本，而不是上层驱逐时降级下去的数据；若在 SSD 之下再接 HDD 或对象存储，写入量与 put 量相当，读回则受 get 预取窗口与 TTFT 预算约束。远端层目前以 Mooncake Store、PCFS 等为对象，公开资料没有出现机械盘作为缓存层的配置或测试；TACO-LLM 的卸载止于 CPU 内存。
+FlexKV 是本报告所调研的云厂商方案中，把 SSD 作为常规缓存层写进默认配置示例最直接的一个：block 级布局、block-wise 合并大 I/O、io_uring 队列深度 512、多 SSD 目录并行和 GDS 都针对顺序性较好的大块读写设计，异步 put 与 write-through 让下沉写入不阻塞推理。“驱逐不触发下沉”的语义意味着慢层的数据是 put 时就写入的副本（另有一种情况：从远端层读回的 block 会顺带补写一份到 SSD），而不是上层驱逐时降级下去的数据；若在 SSD 之下再接 HDD 或对象存储，写入量与 put 量相当，读回则受 get 预取窗口与 TTFT 预算约束。远端层目前以 Mooncake Store、PCFS 等为对象，公开资料没有出现机械盘作为缓存层的配置或测试；TACO-LLM 的卸载止于 CPU 内存。
 
 ### 资料边界
 
-本章架构与配置均来自 FlexKV 官方仓库（采集于 2026-11-18 的 main 分支），README 中标注为 proposed / under review 的功能不视为稳定发布能力。2026 年的 60% / 13% / 16% 来自官方稿件中的图片，缺少测试条件；Phison 数据为合作方实测转述。TACO-LLM 的前缀卸载是否在腾讯云托管模型服务（如混元 API）中默认启用，未找到公开说明。
+本章架构与配置均来自 FlexKV 官方仓库（采集于 2026-11-18 的 main 分支；放置策略一节的源码核对固定到提交 `542b11c`，采集于 2026-11-19），README 中标注为 proposed / under review 的功能不视为稳定发布能力。2026 年的 60% / 13% / 16% 来自官方稿件中的图片，缺少测试条件；Phison 数据为合作方实测转述。TACO-LLM 的前缀卸载是否在腾讯云托管模型服务（如混元 API）中默认启用，未找到公开说明。
 
 ## 本章资料
 
 - **[F]** [腾讯云 TACO · FlexKV 官方 GitHub 仓库 README（main 分支，采集于 2026-11-18）](https://github.com/taco-project/FlexKV)
+- **[PLTX1]** [FlexKV 源码 · flexkv/cache/cache_engine.py（GlobalCacheEngine get/put/take，提交 542b11c，2026-11-16，采集于 2026-11-19）](https://github.com/taco-project/FlexKV/blob/542b11c8f22ee74c34ceeb6c8b63db7832e31ece/flexkv/cache/cache_engine.py)
+- **[PLTX2]** [FlexKV 源码 · flexkv/integration/vllm/vllm_v1_adapter.py（request_finished / _need_to_put，提交 542b11c）](https://github.com/taco-project/FlexKV/blob/542b11c8f22ee74c34ceeb6c8b63db7832e31ece/flexkv/integration/vllm/vllm_v1_adapter.py)
+- **[PLTX3]** [FlexKV 源码 · flexkv/common/config.py（CacheConfig / UserConfig 默认值，提交 542b11c）](https://github.com/taco-project/FlexKV/blob/542b11c8f22ee74c34ceeb6c8b63db7832e31ece/flexkv/common/config.py)
+- **[PLTX4]** [FlexKV 源码 · flexkv/prefetch/policy.py（预取停止策略，提交 542b11c）](https://github.com/taco-project/FlexKV/blob/542b11c8f22ee74c34ceeb6c8b63db7832e31ece/flexkv/prefetch/policy.py)
+- **[PLTX5]** [FlexKV 源码 · flexkv/cache/hie_cache_engine.py（本地 / 分布式索引 match_all，提交 542b11c）](https://github.com/taco-project/FlexKV/blob/542b11c8f22ee74c34ceeb6c8b63db7832e31ece/flexkv/cache/hie_cache_engine.py)
+- **[PLTX6]** [ModelScope · Qwen/Qwen3-32B config.json（采集于 2026-11-19）](https://modelscope.cn/models/Qwen/Qwen3-32B/file/view/master/config.json)
+- **[PLTX7]** [FlexKV 官方文档 · radixshmem 模式配置（docs/radixshmem/config_zh.md，提交 542b11c）](https://github.com/taco-project/FlexKV/blob/542b11c8f22ee74c34ceeb6c8b63db7832e31ece/docs/radixshmem/config_zh.md)
+- **[PLTX8]** [FlexKV 官方文档 · Dynamo 集成（docs/dynamo_integration/README_zh.md，提交 542b11c）](https://github.com/taco-project/FlexKV/blob/542b11c8f22ee74c34ceeb6c8b63db7832e31ece/docs/dynamo_integration/README_zh.md)
+- **[PLTX9]** [FlexKV 官方文档 · Gemma4 支持（docs/gemma4_support.md，提交 542b11c）](https://github.com/taco-project/FlexKV/blob/542b11c8f22ee74c34ceeb6c8b63db7832e31ece/docs/gemma4_support.md)
+- **[PLTX10]** [FlexKV 仓库 · 分布式 KVCache 基准配置（benchmarks/example_dist_config.yml，提交 542b11c）](https://github.com/taco-project/FlexKV/blob/542b11c8f22ee74c34ceeb6c8b63db7832e31ece/benchmarks/example_dist_config.yml)
 - **[TX1]** [腾讯开源 · 分布式KVCache多级缓存架构 - FlexKV正式开源！（腾讯云开发者社区，2025-10-10）](https://cloud.tencent.com/developer/article/2574815)
 - **[TX2]** [腾讯云开发者社区（小腾资讯君，转载）· 腾讯这项省Token技术，成为全球主流推理框架官方方案（2026-04-14）](https://cloud.tencent.com/developer/article/2654280)
 - **[TX3]** [FlexKV 官方文档 · 缓存驱逐策略指南（docs/eviction_policy/README_zh.md）](https://github.com/taco-project/FlexKV/blob/main/docs/eviction_policy/README_zh.md)

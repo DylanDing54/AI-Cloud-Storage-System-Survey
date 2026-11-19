@@ -89,6 +89,12 @@
    "Meta",
    "官方工程实践 · 通用内存卸载 + LLM 推理并行",
    "15-meta.md"
+  ],
+  [
+   "16",
+   "KV Cache 放置策略横向对比",
+   "横向对比 · 15 章放置策略与硬件配置汇总",
+   "16-placement-compare.md"
   ]
  ],
  "inference-engines": [

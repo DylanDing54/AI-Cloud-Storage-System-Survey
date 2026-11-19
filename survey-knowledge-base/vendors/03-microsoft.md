@@ -125,15 +125,53 @@ Learn 文档没有公开 Azure OpenAI 的内部路由算法，但有三点间接
 
 **AKS 上的 Dynamo。**AKS 博客第 1 篇（2025-10-24）介绍，Dynamo 的 LLM-aware Router 通过对请求哈希、跟踪缓存位置并计算重叠分数来管理 KV；KV Block Manager（KVBM）将不常访问的 KV 块卸载到 CPU RAM、SSD 或对象存储，支持分层缓存与淘汰策略，可把缓存容量扩展到 PB 级。文章还明确引用 Splitwise 作为 PD 分离的研究依据。 [AZ6]
 
-**KV 卸载到 Azure Blob。**Azure Storage 博客（2026-08-11）宣布 Azure Blob Storage 与 NVIDIA Dynamo 栈原生集成。其中 NIXL 的 Azure Blob 插件允许 LMCache 等 KV 管理工具把 KV cache 直接卸载到 Blob，命中时从 Blob 取回 KV 而不重算。官方图表显示：Mistral Medium 3.5-128B（TP=8），在单台 Standard_ND96isr_H100_v5（8×H100 80GB）上运行 vLLM 0.20.2 + LMCache 0.4.5，120k tokens 提示时 TTFT 比基线 vLLM 快 2.79×（少 8.37 s），正文概括为“最高 2.8×”。文中同时报告，ModelExpress 从 Blob 加载权重最高快 7.3×，冷启动最高快 4.6×。 [AZ8]
+**KV 卸载到 Azure Blob。**Azure Storage 博客（2026-08-11）宣布 Azure Blob Storage 与 NVIDIA Dynamo 栈原生集成。其中 NIXL 的 Azure Blob 插件允许 LMCache 等 KV 管理工具把 KV cache 直接卸载到 Blob，命中时从 Blob 取回 KV 而不重算。官方图表显示：Mistral Medium 3.5-128B（TP=8），在单台 Standard_ND96isr_H100_v5（8×H100 80GB）上运行 vLLM 0.20.2 + LMCache 0.4.5，120k tokens 提示时 TTFT 比基线 vLLM 快 2.79×（少 8.37 s），正文概括为“最高 2.8×”。博客链接的配方显示，该测试关闭了 vLLM 自带前缀缓存和 LMCache 本地 CPU 缓存层（`local_cpu: False`），CPU 仅作 50 GiB 暂存缓冲，Blob 账户为 Premium 块 Blob、LRS。 [PLMS3]文中同时报告，ModelExpress 从 Blob 加载权重最高快 7.3×，冷启动最高快 4.6×。 [AZ8]
 
 ![Azure Storage 博客「Accelerate Inference on AKS with Azure Blob Storage and NVIDIA Dynamo」Figure 2 原图：基线 vLLM 与 vLLM + LMCache + NIXL（Azure Blob Storage）的 TTFT 随提示长度变化，120k tokens 时快 2.79×](../figures/microsoft-3.png)
 
 *Azure Storage 博客「Accelerate Inference on AKS with Azure Blob Storage and NVIDIA Dynamo」Figure 2 原图：基线 vLLM 与 vLLM + LMCache + NIXL（Azure Blob Storage）的 TTFT 随提示长度变化，120k tokens 时快 2.79×* — [原始来源](https://techcommunity.microsoft.com/blog/azurestorageblog/accelerate-inference-on-aks-with-azure-blob-storage-and-nvidia-dynamo/4543408)
 
+### 放置策略：哪些 KV 放到哪一层
+
+微软公开资料里能回答“哪些 KV 放到哪一层”的有三类：Azure OpenAI 的保留策略（唯一由官方文档直接说明“内存满时卸载到 GPU-local storage”的托管服务）、KAITO（AKS 上的开源推理算子，源码给出 L1 容量、chunk 大小和淘汰策略），以及 Azure Storage 团队的 LMCache + NIXL → Azure Blob 配方。下表把三者放在一起，托管服务未公开的部分如实标注。
+
+| 维度 | 该系统做法 | 证据类型与引用 |
+|---|---|---|
+| 层级与介质 | Azure OpenAI：内存层（`in_memory`）+ “GPU-local storage”（extended / `24h`，数据暂存在 GPU 机器上）；是 HBM 还是主机 DRAM、本地存储是何种介质、容量均未公开。KAITO：GPU → 主机内存 L1（LMCache MP server），明确“不支持”本地 NVMe 或远端对象存储。Blob 配方：GPU → 50 GiB CPU 暂存缓冲 → Premium 块 Blob（LRS） | Azure OpenAI 官方明确两层、介质未公开 [PB]；KAITO 官方文档 / 源码 [PLMS1][PLMS2]；Blob 配方见官方博客链接的 Gist [AZ8][PLMS3] |
+| 放置单位 | Azure OpenAI：以前缀为单位；旧模型超过 1,024 tokens 后按 128 tokens 递增命中，GPT-5.6+ 以断点为界、不再 128 舍入。KAITO 与 Blob 配方：LMCache chunk，`--chunk-size 256` / `chunk_size: 256` | 官方明确 / 源码可见 [PB][PLMS2][PLMS3] |
+| 准入 | Azure OpenAI：≥1,024 tokens 且前 1,024 tokens 完全相同；GPT-5.6+ 由断点决定（implicit 模式自动断点 + 最多 3 个显式写入，explicit 最多 4 个），往轮断点只读不重写。KAITO：所有可复用块写入 L1，无热度阈值。是否缓存 decode 输出 KV：均未公开 | 官方明确 [PB][PLMS1]；decode KV 未公开 |
+| 写入时机 | Azure OpenAI：请求处理时写入，写入时机与副本数未公开。Blob 配方：`nixl_async_put: true`，后台异步上传；`local_cpu: False` 使 CPU 只作暂存而不作缓存层 | Azure OpenAI 未公开；Blob 配方明确 [PLMS3] |
+| 降级与淘汰 | `in_memory`：通常闲置 5–10 分钟清除，最后一次使用后 1 小时内必删。`24h`：内存满时把 KV 张量卸载到 GPU-local storage，最长 24 小时。GPT-5.6+：`ttl` 是最短保留（`30m` / `12h`），之后何时淘汰未公开。KAITO：`--eviction-policy LRU` | 官方明确（算法未公开） [PB]；KAITO 源码可见 [PLMS2] |
+| 提升与预取 | Azure OpenAI：未公开。KAITO：需要时从 CPU 内存载回 GPU。Blob 配方：命中时经 NIXL 从 Blob 流式读回，跑满 VM 80 Gbps 网卡 | Azure OpenAI 未公开；KAITO / 配方官方明确 [PLMS1][PLMS3] |
+| 位置选择 | Azure OpenAI：缓存按订阅隔离；`prompt_cache_key` 改善相关请求的匹配，同一“前缀 + key”约 15 RPM 以上部分请求会未命中；extended 数据留在 Data Zone / 区域边界内。AKS + Dynamo：KV 感知路由代价 = overlap_weight × 未缓存 prefill 块 + decode 块 | 官方明确 [PB][AZ7]；路由内部算法未公开 |
+| 决策者 | Azure OpenAI：用户（断点、`prompt_cache_retention` / `ttl`、`prompt_cache_key`）+ 服务端（是否卸载、何时淘汰、放在哪台机器）。KAITO：用户只调 `kv_cache_cpu_memory_utilization`，LMCache sidecar 执行 | 官方明确 [PB][PLMS1] |
+| 选择依据 | Azure OpenAI：用户按复用频率选保留与 TTL，GPT-5.6+ 按 TTL 对写入差别计费；服务端依据未公开。Blob 配方与 Splitwise：以“传输快于重算”为前提，Splitwise 依据 prefill 受算力、decode 受带宽约束把 KV 放到不同机器池；无公开的在线成本模型 | 官方明确 [PB][AZ1][AZ4][AZ8] |
+
+**选择逻辑。**Azure OpenAI 的放置决策分成两半。用户侧通过三个旋钮间接决定放置：断点（或旧模型的“前 1,024 tokens 相同”规则）决定**哪段前缀有资格**被缓存；`prompt_cache_retention` / `ttl` 决定**保留多久**，从而间接决定会不会被推到容量更大的层；`prompt_cache_key` 决定**落到哪组机器**。服务端则在内存满时把 extended 前缀的 KV 张量卸载到 GPU-local storage——这是“淘汰时下沉（evict-to-lower）”式写法，而不是写穿。 [PB]旧参数是保留上限、新参数是保留下限且对 12 小时写入单独计费，说明长驻留前缀被当作消耗容量层的对象单独定价。 [PB][AZ1]
+
+KAITO 体现了微软开源侧更保守的默认：只把 KV 下沉到同一节点的主机内存，L1 容量 = 可用主机内存 × `kv_cache_cpu_memory_utilization`（默认 0.5）÷ TP，按 256-token chunk 存放、LRU 淘汰，并懒分配锁页内存（初始 1 GiB 后台扩展）；vLLM 重启时 LMCache sidecar 保留 L1。P/D 分离部署不启动本地 LMCache，而是用 NIXL 直传。 [PLMS1][PLMS2][PLMS4] Blob 配方则走到另一端：关闭本地 CPU 缓存层，把 Blob 当唯一缓存层，以验证“远端对象存储读回也比重算快”，在 120k tokens 时 TTFT 快 2.79×。 [PLMS3][AZ8]
+
+**例子（Azure OpenAI 部分为本文按文档规则推演）。**一个 32k token 的多轮对话前缀在 gpt-5.5（默认 extended）上：首轮在 1,024 tokens 之后按 128-token 粒度匹配并写入内存层；若随后 GPU 机器内存紧张，这段 KV 被卸载到 GPU-local storage，最长保留 24 小时；用户 2 小时后回来，只要请求带同一 `prompt_cache_key` 并落到持有该缓存的机器，就能以 Cached Input 价格命中。若用 GPT-5.6，则在历史末尾放断点并选 `ttl: 12h`，为写入支付 12 小时费率，换取至少 12 小时的驻留。同一对话在 KAITO 上：32k（32,768）tokens 切成 128 个 256-token chunk 进入主机内存 L1，L1 满时按 LRU 被逐出后即丢失，不会再下沉到 SSD；若要更长保留，需要按 Blob 配方自行接入对象存储。
+
+### 硬件配置信息
+
+下表列出本章来源提到的硬件配置；来源只给出 VM 名称的，用 Microsoft Learn 的 VM 规格页补全（以“规格页”标注）。
+
+| 场景 / 方案 | 计算（GPU / NPU 型号 × 数量，HBM 容量） | CPU 与主机内存（DRAM 容量） | 本地存储（SSD / NVMe / HDD 型号、数量、容量） | 网络（RDMA / NIC 型号与带宽） | 远端 / 共享存储（服务名与规格） | 来源 |
+|---|---|---|---|---|---|---|
+| Azure OpenAI prompt caching（托管） | 未公开（extended 保留“暂存在 GPU 机器上”） | 未公开（in_memory 层介质未说明） | 未公开（“GPU-local storage”介质未说明） | 未公开 | 未公开 | [PB] |
+| AKS + Dynamo KV 感知路由（Part 3）：Qwen3-32B，回放约 23,000 条 Mooncake Tool Agent Traces | 4 × Standard_NC80adis_H100_v5，共 8 × H100；每台 2 × H100 NVL，188 GB（规格页） | 每台 80 vCPU，640 GiB（规格页） | 每台 1 块临时盘 7,152 GiB（规格页） | 每台最多 4 NIC，80,000 Mbps（规格页） | 未使用 | [AZ7][PLMS5] |
+| AKS + Dynamo（Part 1）：GPT-OSS 120B，10 个 GPU 节点，1.2M tokens/s | ND GB200-v6（GB200 NVL72：每机架 72 颗 Blackwell GPU + 36 颗 Grace CPU） | 未公开 | 未公开（KVBM 可卸载到 CPU RAM、NVMe 或网络存储） | 未公开 | 未公开 | [AZ6][AZ7] |
+| LMCache + NIXL → Azure Blob KV 卸载基准（Mistral Medium 3.5-128B 等，TP=8） | 1 × Standard_ND96isr_H100_v5：8 × H100 80GB（640 GB） | 96 vCPU，1,900 GiB；LMCache CPU 暂存缓冲 50 GiB，关闭本地 CPU 缓存层 | 规格页：1 块临时盘 1,024 GiB + 8 块 NVMe 共 28 TiB（测试未用作 KV 层） | 测试写明 80 Gbps 以太网并被跑满；规格页另有每 GPU 1 条 400 Gbps Quantum-2 CX7 InfiniBand（每 VM 3.2 Tbps） | Azure Premium 块 Blob 存储账户，LRS，South Africa North | [AZ8][PLMS3][PLMS6] |
+| Startups 博客：两副本前缀缓存冷热对照（Phi-3.5-mini，vLLM） | 2 副本，各 1 × T4（规格页 16 GB）；文中 GPU VM 变量为 Standard_NC4as_T4_v3 | 4 vCPU，28 GiB（规格页） | 临时盘 176 GiB（规格页） | 8,000 Mbps（规格页） | — | [AZ9][PLMS7] |
+| KAITO KV 卸载文档示例（gemma-4-12B-it InferenceSet） | Standard_NC24ads_A100_v4：1 × A100，80 GB（规格页） | 24 vCPU，220 GiB（规格页）；L1 = 可用主机内存 × 0.5 ÷ TP（文档算例：400 GiB、TP=2 → 100 GiB） | 临时盘 64 GiB（规格页）；KAITO 不支持卸载到本地 NVMe | 20,000 Mbps（规格页） | 不支持 | [PLMS1][PLMS8] |
+| Splitwise（MSR，ISCA 2024）集群设计 | NVIDIA DGX-A100、DGX-H100（另有功率封顶的 DGX-H100） | 博客未给出 | 博客未给出 | prompt 机 → token 机经 InfiniBand 传 KV | — | [AZ4] |
+
+KV 实际落地的位置：托管服务为“内存 + GPU-local storage”（介质未公开）；自建方案中为 GPU HBM、主机 DRAM（KAITO / LMCache L1）、Azure Blob（经 CPU 暂存缓冲），Dynamo KVBM 可选 NVMe。所读微软来源均未给出 HDD，也未说明 Blob 后端介质。
+
 ### 与 KV Cache 多级存储（SSD / HDD 下沉）的关系（本文分析）
 
-微软公开资料呈现出三个层次。托管 API 层只承认两级：内存层（in_memory，分钟级闲置淘汰）和“GPU-local storage”（extended，最长 24 小时，内存满时卸载）。GPU-local storage 最自然的解读是 GPU 服务器本地 NVMe SSD，但文档没有说明介质、容量或命中时延。12 小时 TTL 和单独的写入费率，说明 Azure 已把长驻留 KV 当作要消耗存储资源、需要单独定价的对象。自建推理层（AKS + Dynamo / LMCache）则公开把 KV 延伸到 CPU RAM、SSD 和 Azure Blob 对象存储，并给出 Blob 卸载的 TTFT 数据。Blob 的底层介质（SSD / HDD 混合）对用户不可见，因此这条路径在逻辑上已经存在“容量层由对象存储承载”的形态。至于 HDD 是否出现在 Azure OpenAI 托管服务的 KV 路径中，现有官方资料无法支持任何结论。
+微软公开资料呈现出三个层次。托管 API 层只承认两级：内存层（in_memory，分钟级闲置淘汰）和“GPU-local storage”（extended，最长 24 小时，内存满时卸载）。GPU-local storage 最自然的解读是 GPU 服务器本地 NVMe SSD，但文档没有说明介质、容量或命中时延。12 小时 TTL 和单独的写入费率，说明 Azure 已把长驻留 KV 当作要消耗存储资源、需要单独定价的对象。自建推理层则分两档：KAITO 默认只卸载到主机内存，文档明确不支持本地 NVMe 或远端对象存储； [PLMS1]AKS + Dynamo / LMCache 方案则公开把 KV 延伸到 CPU RAM、SSD 和 Azure Blob 对象存储，并给出 Blob 卸载的 TTFT 数据。Blob 的底层介质（SSD / HDD 混合）对用户不可见，因此这条路径在逻辑上已经存在“容量层由对象存储承载”的形态。至于 HDD 是否出现在 Azure OpenAI 托管服务的 KV 路径中，现有官方资料无法支持任何结论。
 
 ### 资料边界
 
@@ -152,3 +190,11 @@ Azure OpenAI 内部的 KV 分层结构、GPU-local storage 的具体介质、路
 - **[AZ9]** [Microsoft Tech Community · Startups at Microsoft Blog：Inference Options on Azure: An Architect’s View，2026-10-13](https://techcommunity.microsoft.com/blog/startupsatmicrosoftblog/inference-options-on-azure-an-architect%E2%80%99s-view/4563542)
 - **[AZ10]** [Microsoft Research · DynamoLLM: Designing LLM Inference Clusters for Performance and Energy Efficiency（HPCA）](https://www.microsoft.com/en-us/research/publication/dynamollm-designing-llm-inference-clusters-for-performance-and-energy-efficiency/)
 - **[PB]** [Microsoft Learn · Azure OpenAI in Microsoft Foundry: Prompt caching（页面更新 2026-11-06，采集于 2026-11-18）](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/prompt-caching)
+- **[PLMS1]** [KAITO 项目（kaito-project/kaito）· KV Cache Offloading 文档（website/docs/kv-cache-offloading.md，提交 3d5ca31，2026-10-29 合并 PR #2364）](https://github.com/kaito-project/kaito/blob/3d5ca31f7fd2fcdb796f6e15f99b2a9e489f2560/website/docs/kv-cache-offloading.md)
+- **[PLMS2]** [KAITO 项目源码 · presets/workspace/inference/vllm/lmcache_server.py（--chunk-size 256、--eviction-policy LRU、L1 容量计算，提交 3d5ca31）](https://github.com/kaito-project/kaito/blob/3d5ca31f7fd2fcdb796f6e15f99b2a9e489f2560/presets/workspace/inference/vllm/lmcache_server.py)
+- **[PLMS3]** [Azure Storage 博客链接的配方（GitHub Gist，kyleknap）· Enhancing vLLM with Azure Blob Storage KV Cache Offload via LMCache & NIXL（更新于 2026-05-27，采集于 2026-11-19）](https://gist.github.com/kyleknap/6b19dec51fd555e22930edfbde6cd8d5)
+- **[PLMS4]** [KAITO GitHub · PR #2364 feat: migrate KV cache offloading to use LMCacheMPConnector（2026-10-29 合并，含重启行为说明）](https://github.com/kaito-project/kaito/pull/2364)
+- **[PLMS5]** [Microsoft Learn · NCads H100 v5 sizes series（Standard_NC80adis_H100_v5 规格，采集于 2026-11-19）](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/ncadsh100v5-series)
+- **[PLMS6]** [Microsoft Learn · ND H100 v5 sizes series（Standard_ND96isr_H100_v5 规格，采集于 2026-11-19）](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/ndh100v5-series)
+- **[PLMS7]** [Microsoft Learn · NCas T4 v3 sizes series（Standard_NC4as_T4_v3 规格，采集于 2026-11-19）](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/ncast4v3-series)
+- **[PLMS8]** [Microsoft Learn · NC A100 v4 sizes series（Standard_NC24ads_A100_v4 规格，采集于 2026-11-19）](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/gpu-accelerated/nca100v4-series)

@@ -13,7 +13,7 @@
 | 并行计算与 Decode | TP 在同层交换部分结果；PP 在相邻阶段传激活；MoE 的 EP 按 token 路由交换激活并汇合；DP 将请求分到不同副本。Decode 逐步生成，单步反复读取权重和历史 KV。 | 小批量时带宽与同步常占较大比例。TP 集合通信、EP 热点、PP 流水气泡及副本间负载差异，都会改变每输出 token 的时间（TBT）。 [VL21][DS2] |
 | 冷前缀回填 | 控制面查询命中区间并预留目标槽位；数据面将命中字节从主机、对端设备或存储恢复。CPU 页锁定或内存注册有助于支持相应 DMA 通路，实际要求由驱动和后端决定。 | 首 token 要等到所需层的 KV 可用。记录存储队列、网络队列、主机缓冲和 H2D 等待，另计被其他计算掩盖的部分。 [SGI33][VL22][DS2][HW1] |
 
-![计算节点互连与存储支路的物理拓扑示例。上半图是支持直接设备访问时的一条 P/D 跨机路径；下半图是带主机缓冲的存储路径。部署可选择不同交换网络、协议和后端。本文依据 GPUDirect、SuperPOD 参考架构及引擎文档绘制。](../figures/engine-network-storage-topology.svg)
+![计算节点互连与存储支路的物理拓扑示例。上半图是支持直接设备访问时的一条 P/D 跨机路径；下半图是带主机缓冲的存储路径。部署可选择不同交换网络、协议和后端。本文依据 GPUDirect、SuperPOD 参考架构及引擎文档绘制。](../figures/engine-hardware-1.svg)
 
 *计算节点互连与存储支路的物理拓扑示例。上半图是支持直接设备访问时的一条 P/D 跨机路径；下半图是带主机缓冲的存储路径。部署可选择不同交换网络、协议和后端。本文依据 GPUDirect、SuperPOD 参考架构及引擎文档绘制。* — [原始来源](https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-b200/latest/network-fabrics.html)
 

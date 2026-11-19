@@ -4,7 +4,7 @@
 
 AMD MEXT Predictive Memory™ 是一款纯软件的内存分层产品。它把较冷的内存页从 DRAM 卸载到 NVMe 闪存，再用本地运行的 AI 预测引擎判断哪些页即将被访问，并在应用发起访问之前把它们搬回 DRAM。AMD 官方产品页的定位语是 “Making Flash Work Like DRAM”：让低成本、大容量的闪存在应用看来像 DRAM 速度的内存，形成介于 DRAM 和存储之间的新“性价比层”，以降低对昂贵 DRAM 的依赖。 [AMD1] 本章依据 AMD 官方产品页、收购博客、产品简报、安装指南、6 份性能白皮书和 AMD IT 内部部署案例整理，均为 2026-11-18 采集的官方材料。
 
-### 1. 收购背景与产品定位
+### 收购背景与产品定位
 
 AMD 于 **2026-06-15** 在官方博客宣布收购 MEXT。博客将内存描述为云和企业环境中 AI 模型、数据分析、虚拟化和 HPC 负载共同面对的关键约束，称 MEXT 是“AI 驱动内存优化技术的先行者”，其预测式内存技术“让闪存表现得更像 DRAM”，AMD 计划把这项技术整合到整个数据中心产品组合中，并吸收 MEXT 在内存系统和 AI 基础设施方面的团队。 [AMD2] AMD 在 2026 年第二季度财报（2026-08-04）中也把“收购 MEXT，为 AI 负载增加 AI 驱动的预测式内存技术、优化内存使用并扩展可用容量”列为当季数据中心业务进展之一。 [AMD10]
 
@@ -12,7 +12,7 @@ AMD 于 **2026-06-15** 在官方博客宣布收购 MEXT。博客将内存描述�
 
 由此，MEXT 给出两种使用方式：**缩减 DRAM**——在更小的物理 DRAM 上运行原有负载，差额由“MEXT + 闪存”构成的 MEXT Memory™ 补足；**扩展容量**——在现有系统上通过软件和一块专用 NVMe 盘增加可用内存，避免为单个大作业采购更大机器或把数据切分到多台机器。 [AMD3][AMD4]
 
-### 2. 工作原理：冷页卸载 → AI 预测 → 提前推回 DRAM
+### 工作原理：冷页卸载 → AI 预测 → 提前推回 DRAM
 
 官方产品页和产品简报把机制概括为三步： [AMD1][AMD3]
 
@@ -28,7 +28,7 @@ AMD 于 **2026-06-15** 在官方博客宣布收购 MEXT。博客将内存描述�
 
 AMD 的 SIGGRAPH 2026 官方博客用同样的语言描述该技术：识别哪些页在用、哪些已经变冷，把冷页卸载到 NAND 闪存，再用基于 AI 的预测引擎在应用再次请求前把它们移回 DRAM。 [AMD9]
 
-### 3. 软件组成：驱动、AI 引擎、守护进程与 RAM View
+### 软件组成：驱动、AI 引擎、守护进程与 RAM View
 
 安装指南（v1.2，2026-10-08）说明，MEXT 以单一安装包交付三个软件组件；白皮书另把可观测性工具 RAM View™ 列为第三个主要组件。 [AMD4][AMD5]
 
@@ -45,7 +45,7 @@ AMD 的 SIGGRAPH 2026 官方博客用同样的语言描述该技术：识别哪�
 
 *AMD MEXT 白皮书（Agentic AI，2026-11）第 5 页：MEXT Driver、MEXT AI Engine、RAM View 三个解决方案组件* — [原始来源](https://www.amd.com/content/dam/amd/en/documents/epyc-business-docs/white-papers/amd-mext-white-paper-agentic-ai-in-6th-gen-amd-epyc.pdf)
 
-### 4. 部署要求与配置方式
+### 部署要求与配置方式
 
 安装指南给出的系统要求如下。 [AMD4]
 
@@ -74,7 +74,7 @@ sudo systemctl enable mextd && sudo systemctl start mextd
 
 配置文件位于 `/etc/opt/mext/mextd.conf`。指南特别提示：运行中不允许停止 mextd，因为这相当于从运行中的系统拔掉一条内存 DIMM；要停用必须先 disable 服务再重启。 [AMD4] 获取方式方面，官方 FAQ 和产品简报均要求通过 AMD 销售代表启动免费的概念验证（PoC），未公开标价。 [AMD1][AMD3]
 
-### 5. 官方公开的性能结果
+### 官方公开的性能结果
 
 AMD 官方产品页列出的目标负载为 EDA / 芯片设计、媒体与娱乐、Agentic AI、数据库与分析。 [AMD1] 截至采集日，AMD 文档中心共有 6 份 MEXT 白皮书，全部为 AMD 内部测试，每个场景跑 3 次取平均。白皮书统一使用“performance-per-DRAM-dollar”指标：相对全 DRAM 基线的归一化性能，除以保留的 DRAM 比例。脚注明确说明该指标**不计入 NVMe、MEXT 授权和其他系统成本，也不等同于整机性价比或 TCO**。 [AMD3][AMD5][AMD6][AMD7]
 
@@ -95,21 +95,59 @@ AMD 官方产品页列出的目标负载为 EDA / 芯片设计、媒体与娱乐
 
 Azure 扩容白皮书说明了“扩展容量”用法的原理：每个 PrimeTime 作业峰值常驻内存约 600GB，4 个并发作业约需 2.4TB，超出 VM 的 1.4TB DRAM；加入约 1.2TB 的 MEXT Memory 池后，同一台 VM 可以跑 4 个作业，单作业变慢，但总吞吐提高 39.7%。该测试中 MEXT 独占一块 1.92TB 的 Microsoft NVMe Direct Disk，并为 MEXT 预留 2 个 CPU。 [AMD6] SIGGRAPH 博客另引用 MEXT 被收购前对 MoonRay 渲染器的评测：Threadripper PRO 上 512GB DRAM 与 256GB DRAM + 256GB NAND 的渲染性能几乎相同，预测引擎对下一个所需页的预测准确率为 97.9%，RAM 相关成本下降约 40%、总 TCO 下降 29%（MEXT 自行撰写的评测）。 [AMD9]
 
-### 6. 生产部署：AMD IT 内部案例
+### 生产部署：AMD IT 内部案例
 
 AMD 官方案例披露，AMD IT 从 2026 年 9 月起在工程师使用的生产计算基础设施（4th / 5th Gen EPYC 服务器）上推广 MEXT，作为“customer zero”实践。首批部署覆盖 86 台主机，提供约 58TB 额外可用内存；按同等 DRAM 容量采购估算约需 330 万美元，MEXT 部署成本约 60.1 万美元，节省约 278 万美元（82%），即以等量 DRAM 18% 的成本获得约 20% 的额外可用内存。AMD IT 计划在新服务器上默认安装 MEXT，预计 2027 年 3 月覆盖约 700 台服务器、累计节省约 2,100 万美元；2027 年底全量 2,000 台服务器时节省超过 6,000 万美元。 [AMD8] 这里的节省额为 AMD IT 自行测算的采购成本对比，案例未给出相应的应用性能数据。
 
-### 7. 与 KV Cache 多级存储的关系（本文分析）
+### 放置策略：哪些 KV 放到哪一层
+
+需要先说明：MEXT 管理的是 Linux 进程的通用内存页，不是 KV Cache。截至 2026-11-19，AMD 官方材料中没有它管理 LLM KV 的说明。下表按规范的各个维度描述 MEXT 自身的放置逻辑；表后再分析它与 KV 分层的对应关系。
+
+| 维度 | MEXT 的做法 | 证据类型与引用 |
+|---|---|---|
+| 层级与介质 | 只有两层：物理 DRAM 和一块专用 NVMe 闪存。闪存以“MEXT Memory”的形式计入系统内存，默认相当于物理 DRAM 的 20%，用 `mextMemory` 调整。NVMe 容量至少是目标值的 1.75 倍，推荐 2 倍以上。不涉及 GPU / HBM，也不支持 HDD 或网络存储 | 官方明确（安装指南 v1.2） [AMD4] |
+| 放置单位 | 内存页（官方表述为 “memory pages”）。页大小、是否处理大页均未公开 | 粒度为官方明确，大小未公开 [AMD3][AMD5] |
+| 准入（下沉到闪存） | 由驱动采集访问遥测，判定“已变冷”的页并卸载到闪存。RAM View 按最近访问时间把页分为 <15s 到 >5min 六档，但判定“冷”的阈值没有公开。被 `mlock` 锁定的页，Linux 内核会放进 unevictable 列表，不参与回收扫描；MEXT 是否、以及如何处理锁页，官方未说明 | 流程为官方明确；阈值未公开；锁页规则见内核文档 [AMD1][AMD5][PLAMD2] |
+| 写入时机 | 持续监控，冷页主动卸载，不是等到 OOM 才被动换出。系统上不允许另外配置磁盘 swap 设备。DRAM 与闪存之间是迁移还是保留副本，未公开 | 官方明确；副本语义未公开 [AMD4][AMD5] |
+| 降级与淘汰 | 按冷热决定。在 MEXT Memory 总量固定的前提下，具体淘汰算法和水位均未公开 | 未公开 |
+| 提升与预取 | 这是 MEXT 的核心：AI 引擎预测哪些已卸载的页即将“由冷转热”，由守护进程 mextd 在应用访问之前把它们迁回 DRAM。引擎是启发式预测器和神经网络（含 transformer）组成的模型族，用“预测的页是否真的被访问”作为反馈持续校准。预测失误时如何回退（例如按缺页同步读回）未公开。媒体报道 AMD 在 Zen 6 发布会的幻灯片上，把随机且不可预测的访问区域标为 “Memory Wall”，即预测失效的区域 | 预测与迁回为官方明确；Memory Wall 来自媒体报道 [AMD1][AMD3][AMD4][PLAMD1] |
+| 位置选择 | 单机内完成，使用本地专用 NVMe，不涉及网络和跨节点 | 官方明确（无网络要求） [AMD1] |
+| 决策者 | MEXT Driver（内核态遥测）、AI Engine（用户态，1 个核）、mextd（迁移，1 个核）；管理员只设定总容量 | 官方明确 [AMD1][AMD4] |
+| 选择依据 | 依据预测的未来页访问序列；目标是让工作集始终驻留在 DRAM，并提高每 DRAM 美元的性能。没有公开成本模型 | 官方明确；成本模型未公开 [AMD5] |
+
+**选择逻辑与取舍。**MEXT 的赌注是：多数内存密集型负载的工作集远小于已配置的内存，而且页访问序列可以预测。这样冷页放在闪存上几乎不付时延代价，代价集中在预测失误和随机访问上。所以官方结果在 DRAM 削减 50% 以内大多接近全 DRAM，削减 75% 时降到基线的 80%–88%，具体随负载而定（见上节表格）。与 Meta TMO 的“按压力反馈决定卸载多少”相比，MEXT 把重点放在“提前迁回什么”上。
+
+**映射到 KV（本文分析）。**一是粒度不匹配。以 WD / Solidigm 简报中 70B 模型 BF16 每 token 320 KiB 为例，vLLM 一个 16 token 的块约 5 MiB；若按 4 KiB 页计，相当于 1,280 页。MEXT 看到的只是页地址序列，不知道前缀、会话或调度队列，而这些恰恰是 KV 层预取最强的信号 [W]。二是锁页。LMCache 等 KV 层的 L1 默认使用 pinned CPU DRAM 做 DMA [LMC2]；如果这类页按内核规则不可回收，MEXT 很可能管不到 KV 池本身。三是实际作用。MEXT 更可能把 GPU 主机上其他进程（agent 工具、RAG 索引、数据预处理）的冷页挪到闪存，从而把更多物理 DRAM 让给 KV 池。
+
+**例子（本文推演）。**设想在一台装有 MEXT 的 vLLM + LMCache 主机上，有一个 32K token 的多轮前缀（按每 token 320 KiB 计约 10 GiB）。它的 KV 首先在 HBM 中生成；被淘汰后进入 LMCache 的 pinned DRAM L1，这部分不由 MEXT 管理；再由 LMCache 自己写入 L2 SSD。与此同时，MEXT 把同一主机上 agent 沙箱几分钟未被访问的堆页迁到它的专用 NVMe，在 agent 恢复执行前再预测性地迁回。两套机制各管一类内存，彼此不知道对方的存在。
+
+### 硬件配置信息
+
+| 场景 / 方案 | 计算（GPU / NPU 型号 × 数量，HBM 容量） | CPU 与主机内存（DRAM 容量） | 本地存储（SSD / NVMe / HDD 型号、数量、容量） | 网络（RDMA / NIC 型号与带宽） | 远端 / 共享存储（服务名与规格） | 来源 |
+|---|---|---|---|---|---|---|
+| Agentic AI 白皮书 | 无 GPU | AMD 参考平台，2 × EPYC 9996（每颗 256 核，SMT 开，NPS4）；基线 DRAM 为每路 1,024.7 GiB，MEXT 场景每路 512GB / 256GB DRAM | MEXT 内存池使用 Solidigm SB5PHA7X038T 3.84TB NVMe | 未公开 | 无 | [AMD5] |
+| PrimeTime 1.5TB（5th Gen） | 无 GPU | 1 × EPYC 9755；1.5TB DDR5（12 × 128GB，6400 MT/s），MEXT 场景为 768GB DRAM + 768GB MEXT | MEXT 使用 Samsung MZQL23T8HCLS-00A07 3.84TB（PCIe Gen4 x4，TLC） | 未公开 | 无 | [AMD3][AMD6] |
+| PrimeTime 512GB（5th Gen） | 无 GPU | 1 × EPYC 9755；装机 1.5TB DDR5（12 × 128GB），呈现给 OS 的为 512 / 256 / 192 / 128GB | MEXT 专用 KIOXIA 1.60TB NVMe；系统盘为 Samsung 3.84TB Gen4 NVMe | 未公开 | 无 | [AMD6] |
+| PrimeTime（6th Gen） | 无 GPU | 1 × EPYC 9686F；装机 1TB DDR5（16 × 64GB，8000 MT/s），呈现 512 / 256 / 192 / 128GB | MEXT 专用 Samsung 3.84TB NVMe；系统盘为 KIOXIA 7.68TB NVMe | 未公开 | 无 | [AMD6] |
+| PrimeTime on Azure HX | 无 GPU | Azure HX 系列 VM，2 × EPYC 9V33X（Genoa-X）；暴露 176 核，给 MEXT 预留 2 个 CPU；约 1.4TB DRAM，另加约 1.2TB MEXT | 2 块 1.92TB Microsoft NVMe Direct Disk（一块作 /tmp，一块由 MEXT 独占） | 未公开 | 无 | [AMD6] |
+| Apache Spark on Azure | 无 GPU | Standard_F64ads_v7（基线，256 GiB）与 F64alds_v7（MEXT，128 GiB），EPYC 9V45，64 核 | MEXT 池使用 1 块 1.7TB NVMe，另有 3 块 1.7TB 本地盘（基线为 4 块）和 300GB OS 盘 | 未公开 | 无 | [AMD7] |
+| AMD IT 生产部署 | 未公开 | 4th / 5th Gen EPYC 服务器，首批 86 台，新增约 58TB 可用内存 | 未公开 | 未公开 | 无 | [AMD8] |
+| MoonRay 渲染（收购前 MEXT 评测） | 未公开 | Threadripper PRO；512GB DRAM 对比 256GB DRAM + 256GB NAND | NAND 型号未公开 | 未公开 | 无 | [AMD9] |
+| 最低安装要求 | 不需要 GPU | 8 核以上的 EPYC 7003+ 或 Threadripper 5000+；DRAM ≥ 64GB | 1 块未使用的 PCIe NVMe mixed-use SSD（Gen3 起，推荐 Gen4+），容量 ≥ 目标值 × 1.75；服务器盘 3 DWPD | 无网络要求 | 无 | [AMD1][AMD4] |
+
+这些配置中都没有 KV Cache：MEXT 只在 CPU DRAM 和本地 NVMe 之间迁移通用内存页，所有测试都不涉及 GPU / HBM。来源没有给出 HDD，产品也只支持原生 NVMe 设备。
+
+### 与 KV Cache 多级存储的关系（本文分析）
 
 截至 2026-11-18，AMD 官方材料中没有 MEXT 用于 LLM 推理 KV Cache、vLLM / SGLang 集成或 GPU 显存分层的描述。官方明确的 AI 场景是 Agentic AI 的 CPU 侧负载（多 agent 并发的工作集），而不是 GPU 上的 KV。以下为本文结合前后章节的分析：
 
-- **层级位置不同**：MEXT 管理的是 CPU DRAM ↔ NVMe 之间的操作系统内存页；KV Cache 系统（LMCache、SGLang HiCache、Dynamo KVBM、FlexKV）管理的是 HBM → DRAM → SSD → 远端 / HDD 之间的 KV 块。两者可以并存，但不是同一层。推理引擎的 CPU KV 池通常使用为 DMA 锁定的 pinned 内存，这类页一般不能被换出；MEXT 官方未说明是否、以及如何处理锁定页，因此不能假设 MEXT 会透明地把 L2 KV 池下沉到闪存。
+- **层级位置不同**：MEXT 管理的是 CPU DRAM ↔ NVMe 之间的操作系统内存页；KV Cache 系统（LMCache、SGLang HiCache、Dynamo KVBM、FlexKV）管理的是 HBM → DRAM → SSD → 远端 / HDD 之间的 KV 块。两者可以并存，但不是同一层。推理引擎的 CPU KV 池通常使用为 DMA 锁定的 pinned 内存（LMCache L1 默认即为 pinned DRAM [LMC2]），以 mlock 锁定的页在内核中属于不可回收页 [PLAMD2]；MEXT 官方未说明是否、以及如何处理锁定页，因此不能假设 MEXT 会透明地把 L2 KV 池下沉到闪存。
 - **可借鉴的是“预测式提前迁回”**：MEXT 把访问时延藏在预测之后，与 KV 侧的预取思路一致——SGLang 的 prefetch 策略、Seagate 白皮书将 Dynamo prefetch hint 列为未来工作、Mooncake 调度器计入远端 KV 传输代价。不同点是 KV 的访问模式更结构化：会话恢复、相同前缀、调度队列都可以作为比页级访问序列更强的预测信号。
 - **可借鉴的是冷热度量与反馈闭环**：RAM View 按 15s 到 5min 以上分档统计页的冷热，AI 引擎用“预测是否命中”持续校准模型；KV 分层同样需要会话闲置时间分布和召回命中反馈来决定下沉深度。Meta TMO 用 PSI 压力反馈调节卸载量，是同类的另一种做法。
 - **闪存耐久与写入吸收是共同约束**：MEXT 要求服务器使用 3 DWPD 的 mixed-use 企业级盘、容量为目标内存的 2 倍以上，说明页级换出会产生持续写入。KV 卸载的写入更重：WD / Solidigm 测得 8 卡 B200 主机的驱逐流约 0.7 GB/s，按此估算每天约 60TB 写入，对单块 3.84TB 盘相当于约 15 DWPD（本文估算）。这再次说明 KV 下沉需要准入控制和缓冲层。
 - **HDD 不在 MEXT 的支持范围内**：MEXT 要求原生 NVMe 设备，页粒度的随机迁回也不适合机械盘。在“HBM → DRAM → SSD → HDD”的 KV 链路中，MEXT 若参与，最可能的位置是扩大 GPU 主机上 CPU 侧进程（agent 沙箱、RAG 检索、工具执行）的可用内存，从而把更多物理 DRAM 留给 KV 池。
 
-### 8. 资料边界
+### 资料边界
 
 全部性能数字均为 AMD 内部测试或 AMD IT 自测，未见第三方复现；performance-per-DRAM-dollar 不含 NVMe、授权和整机成本。官方未公开 AI 模型的结构、页粒度、预测窗口、迁移带宽上限以及 DRAM 不足时的回退策略。Agentic AI 白皮书表中 50% 场景为 3.921 vs 3.910 tasks/s，而脚注按“基线的 99.7%”折算出 1.99x，两处口径略有出入，本文按原文分别列出。
 
@@ -125,3 +163,7 @@ AMD 官方案例披露，AMD IT 从 2026 年 9 月起在工程师使用的生产
 - **[AMD8]** [AMD 官方案例 · AMD IT Avoids 82% of DRAM Expansion Costs with AMD MEXT Software](https://www.amd.com/en/resources/case-studies/amd-it-avoids-82-of-dram-expansion-costs.html)
 - **[AMD9]** [AMD 官方博客 · Open Standards, Real Solutions: AMD at SIGGRAPH 2026](https://www.amd.com/en/blogs/2026/open-standards-real-solutions-amd-at-siggraph-2026.html)
 - **[AMD10]** [AMD 投资者关系 · 2026 年第二季度财报（8-K EX-99.1，2026-08-04）](https://ir.amd.com/financial-information/sec-filings/content/0000002488-26-000121/q22026991.htm)
+- **[LMC2]** [LMCache 官方文档 · Multiprocess (MP) Mode Overview（架构、L1Manager、L2 Adapters、Controllers，采集于 2026-11-18）](https://docs.lmcache.ai/mp/index.html)
+- **[PLAMD1]** [TechPowerUp（媒体报道）· AMD Zen 6 Technical Deep Dive 第 12 页 “AMD MEXT”，2026-11-11（转述 AMD 发布会幻灯片，含 “Memory Wall”）](https://www.techpowerup.com/review/amd-zen-6-technical-deep-dive/12.html)
+- **[PLAMD2]** [Linux Kernel Documentation · The Unevictable LRU（mlock / SHM_LOCK 页不可回收，采集于 2026-11-19）](https://docs.kernel.org/mm/unevictable-lru.html)
+- **[W]** [WD × Solidigm · KV Cache Offload Across Storage Tiers，September 2026 / Revision 02](https://documents.westerndigital.com/content/dam/doc-library/en_us/assets/public/western-digital/collateral/tech-brief/technical-brief-kv-cache-offload-across-storage-tiers-wd.pdf)

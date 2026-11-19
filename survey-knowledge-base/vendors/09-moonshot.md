@@ -28,7 +28,7 @@ FAST'25 论文的标题是“Trading More Storage for Less Computation”。作�
 
 ### 关键机制：块管理、淘汰、传输与调度
 
-**块与淘汰。**论文中，Mooncake Store 以分页块保存所有 KV，块大小按模型规模和最佳网络传输粒度确定，通常为 16–512 token（评测设为 256）；每个块的 hash key 由自身内容和前缀共同决定，用于去重；同一 key 可在不同节点有多个副本以缓解热点。缓存池满时采用 LRU 淘汰，但正在被请求访问的块不淘汰。 [MC1] 开源版的淘汰机制更细：Master 在空间使用达到高水位（默认 90%）或 PutStart 分配失败时触发淘汰，按比例（默认 5%）回收对象，并借助按租约截止时间分桶的索引优先淘汰租约已过期的对象；硬 pin 对象和活跃租约受保护，软 pin 可配置。 [MC3]
+**块与淘汰。**论文中，Mooncake Store 以分页块保存所有 KV，块大小按模型规模和最佳网络传输粒度确定，通常为 16–512 token（评测设为 256）；每个块的 hash key 由自身内容和前缀共同决定，用于去重；同一 key 可在不同节点有多个副本以缓解热点，副本数由 Conductor 的缓存负载均衡策略控制。缓存池满时采用 LRU 淘汰，但正在被请求访问的块不淘汰。 [MC1] 开源版的淘汰机制更细：Master 在空间使用达到高水位（`eviction_high_watermark_ratio`，v0.3.14 默认 0.90）或 PutStart 分配失败时触发淘汰，按比例（`eviction_ratio`，默认 0.05）回收对象，并借助按租约截止时间分桶的索引优先淘汰租约已过期的对象；硬 pin 对象和活跃租约受保护，软 pin 对象仅在没有其他候选时才被淘汰（可配置为不可淘汰）。开源版的副本数由写入方在 `replica_num` 中指定（默认 1），不会按热度自动增减。 [MC3][PLMO1]
 
 **传输引擎。**Transfer Engine 对上提供 Segment（可远程访问的地址空间，可在 DRAM 或加速器显存中；NVMe-oF 存储作为持久 Segment 暴露）和 BatchTransfer（批量异步读写）两类抽象；控制面（etcd/Redis/HTTP 元数据或 P2P 握手）只交换位置信息，不承载数据。 [MC2] 论文披露的实现要点包括：按 NUMA/PCIe 拓扑生成“首选/备选”网卡矩阵，单次请求按 16 KB 切片分散到多张 RDMA 网卡，端点池用 SIEVE 算法淘汰连接，链路故障时自动换路重传。 [MC1] 官方协议文档列出 tcp、rdma、efa 为主要传输，nvmeof、nvlink、hip、cxl、ascend 等为高级选项；检测不到 RDMA 网卡时自动回落到 TCP。 [MC6]
 
@@ -81,6 +81,42 @@ python3 -m sglang.launch_server ... --enable-hierarchical-cache \
 
 [MC5]
 
+### 放置策略：哪些 KV 放到哪一层
+
+Mooncake 的放置决策分在三处：论文中的 Conductor 决定“请求去哪、KV 是否搬过去”，Mooncake Store 的 Master 决定“对象放在哪个段、何时从 DRAM 淘汰或下沉到 SSD”，上游引擎的连接器（vLLM MooncakeStoreConnector、SGLang HiCache）决定“哪些 KV 写进 Store、何时取回”。下表区分论文（FAST'25）与开源实现（Mooncake v0.3.14，2026-11-03 发布）。
+
+| 维度 | Mooncake 的做法 | 证据类型与引用 |
+|---|---|---|
+| 层级与介质 | GPU HBM（实例私有分页 KV）→ 各节点 CPU DRAM 汇成的分布式池（Store 的 memory segment）→ 本地 SSD（LOCAL_DISK 副本）→ 可选的共享文件系统 / S3 兼容对象存储；论文估算单机 DRAM 约 300 万 token（LLaMA3-70B），接近最大命中率需约 5000 万 token | 论文明确说明 [MC1]；开源文档明确说明 [MC3][MC4][MC9] |
+| 放置单位 | 论文：分页块，通常 16–512 token（评测 256），键由自身与前缀共同哈希；开源 Store 是通用对象（key→切片），粒度由上层决定：vLLM 按 block（可用 `store_chunk_size` 调大），SGLang L3 按 page 存取 | 论文明确 [MC1]；官方文档明确 [PLMO3][SGD] |
+| 准入 | 论文：prefill 新算出的增量 KV 写回 CPU 内存，未提及热度门槛或最小长度。vLLM：prefill 侧（kv_producer / kv_both）写入，decode 输出 KV 默认不写，`save_decode_cache` 置 true 才追加已填满的 decode block。SGLang：`--hicache-write-policy` 为 `write_through`（全部写）、`write_through_selective`（命中次数超阈值才写）或 `write_back`（被上层淘汰时才写） | 论文明确 [MC1]；官方文档明确 [PLMO3][SGD] |
+| 写入时机与副本 | Store 采用两阶段 PutStart / PutEnd，写入请求的 `replica_num`（默认 1）份内存副本，同一切片的副本必在不同段，尽力而为；DRAM→SSD 不是写穿，而是 Master 选出待淘汰对象后由客户端心跳线程异步按桶（默认 256 MB 或 500 个 key）写盘，成功后增加 LOCAL_DISK 副本 | 官方文档 + 源码可见 [MC3][MC4][PLMO1] |
+| 降级与淘汰 | 论文：池满时 LRU，正被访问的块不淘汰。开源：用量达 `eviction_high_watermark_ratio`（默认 0.90）或分配失败时淘汰 `eviction_ratio`（默认 0.05）；按租约截止时间分桶，优先淘汰租约最早过期者；读取授予租约（`default_kv_lease_ttl` 默认 10 s），硬 pin 永不淘汰，软 pin（默认 30 分钟）最后才淘汰。SSD 层按桶 FIFO / LRU，容量上限与高低水位可选，默认不淘汰 | 论文明确 [MC1]；文档 + 源码 v0.3.14 可见 [MC3][MC4][PLMO1][PLMO2] |
+| 提升与预取 | Get 先读内存副本，无内存副本时回落 SSD：持盘客户端读入 O_DIRECT 暂存区，再经 RDMA / TCP 拉取；可选 is_exist 时预取回 DRAM（默认关）。vLLM 支持异步加载与到达即查（`lookup_prefetch_limit`），查询超时（`lookup_timeout_s` 默认 1 s）按未命中处理并重算；SGLang 在 L3 命中超过 256 token 时预取进 L2，按 `best_effort` / `wait_complete` / `timeout` 终止 | 官方文档明确 [MC4][MC8][PLMO3][SGD] |
+| 位置选择 | 论文：Conductor 按“传输 + 排队 + prefill”估算 TTFT 选 prefill 实例；最佳远端前缀与本地前缀之比超过 `kvcache_balancing_threshold` 时把 KV 拉到目标实例，热块由此自动多副本。开源 Store：`--allocation_strategy` 默认 `random`，另有 `free_ratio_first`、`ssd_free_ratio_first`、`local_first`、`cxl`；`preferred_segment` 优先、失败回落随机；vLLM 用 `MOONCAKE_PREFERRED_SEGMENT` 指定本机 owner 段 | 论文明确 [MC1]；文档 + 源码可见 [MC3][PLMO2][PLMO3] |
+| 决策者 | 论文：全局调度器 Conductor。开源：Store Master 管分配 / 淘汰 / 下沉；Conductor 只是前缀索引（按 device、cpu_local、cpu_share、disk 返回各实例命中 token 数），选实例由外部网关 / 路由器完成；写什么由引擎连接器决定 | 论文明确 [MC1]；文档明确 [MC7] |
+| 选择依据 | 论文有显式代价模型：预测 TTFT（多项式回归拟合的 prefill 时间 + 传输时间 + 排队），并以 TTFT / TBT SLO 决定接收或拒绝（429）；Store 层依据容量水位、租约与 pin，无复用概率模型；阈值目前人工设定 | 论文明确 [MC1]；文档明确 [MC3] |
+
+**选择逻辑。**论文的出发点是“复用前缀比重算便宜，前提是加载够快”，因此放置与调度是同一个决策：Conductor 并不预测哪些块将来会热，而是在每次调度时比较“在已有前缀的实例上排队”和“把前缀拉到空闲实例再算”两条路径的 TTFT。远端前缀不够长（与本地前缀之比不超过阈值）就宁可重算；够长且目标实例更空就拉取并留在本地，热点前缀由此在 prefill 池中自然复制。论文图 11 显示，对话与工具 / Agent 负载中前 100 个热键在系统稳定后几乎在每个 prefill 实例上都有副本，而共享前缀少的合成负载副本少且波动大 [MC1]。冷块则按 LRU 被换出，论文称“最冷的块应被换出以降低保留成本”，但没有给出换出到 SSD 的具体阈值 [MC1]。
+
+开源 Store 把这套机制拆成更通用的原语：副本数由写入方在 `ReplicateConfig` 中指定，而不是由 Store 根据热度自动增减；论文所说的由 Conductor 通过 `change_replica` 调整副本数的热点复制，在开源 Store 文档中未见对应的自动策略，需要上层路由 / 连接器配合实现 [MC1][MC3]。DRAM 层的保护顺序是“活跃租约 / 硬 pin > 软 pin > 普通对象”，系统提示词这类高复用前缀官方推荐用软 pin 保留；SSD 只接收被 Master 选中淘汰的对象，属于 evict-to-lower 而非写穿，因此 SSD 上的数据天然是“曾经进入过 DRAM、但近期不够热”的部分 [MC3][MC4]。引擎侧的取舍在于写入带宽：SGLang 官方最佳实践示例均用 `write_through` 换取最高复用，`write_through_selective` 只备份命中达到阈值的热数据，`write_back` 只在主机层淘汰时才写 L3 [SGD]；vLLM 则默认只写 prompt 前缀，decode 输出是否入池交给 `save_decode_cache` [PLMO3]。
+
+**例子（按公开参数推算）。**一个 32k token 的多轮对话前缀，在 LLaMA3-70B 结构下约 320 KB/token，总量约 10 GB；按 256 token 一块约为 128 块、每块约 80 MB（本文按论文参数估算） [MC1]。第一轮：prefill 实例在 HBM 中算出 KV，并把增量 KV 写入 Store 的 DRAM 段（开源默认 1 份副本、段位置随机或优先本机段），同时逐层传给 decode 节点。第二轮：路由器向 Conductor 查询，若持有该前缀的实例过忙、而空闲实例只命中很短前缀，则把 32k 前缀拉到空闲实例，形成第二份副本。会话沉寂后，若 DRAM 用量越过 90% 水位、该对象租约已过期且未被 pin，它会进入淘汰批次；开启 `enable_offload` 时由客户端写入本地 SSD 桶成为 LOCAL_DISK 副本，下次命中时从 SSD 读回经 RDMA 送达；在 SGLang 中，这次 L3 命中会先预取到实例私有的主机内存（L2），超时则只用已取回的部分，其余重算 [MC3][MC4][SGD]。
+
+### 硬件配置信息
+
+| 场景 / 方案 | 计算（GPU / NPU 型号 × 数量，HBM 容量） | CPU 与主机内存（DRAM 容量） | 本地存储（SSD / NVMe / HDD 型号、数量、容量） | 网络（RDMA / NIC 型号与带宽） | 远端 / 共享存储（服务名与规格） | 来源 |
+|---|---|---|---|---|---|---|
+| Kimi 线上生产（论文所述现网） | NVIDIA A800 与 H800 集群（标准 HGX 机型），“数千节点”；单机卡数与总卡数未公开 | 未公开 | 未公开（论文图中节点含 SSD，型号容量未公开） | 每张 A800 配 100/200 Gbps 网卡，每张 H800 配 200/400 Gbps 网卡；RDMA 互联最高 8×400 Gbps | Mooncake Store（各节点 CPU / DRAM / SSD 汇聚的分布式 KV 池），规模未公开 | [MC1] |
+| FAST'25 收益条件分析（理论推算） | 8×A800 或 8×H800 单机，LLaMA3-70B | 按“约 1 TB DRAM 本地缓存”估算可存约 300 万 token | 未涉及 | 每张 A800 满载一张 100 Gbps 网卡即可满足条件（论文分析） | 未涉及 | [MC1] |
+| FAST'25 端到端 / 调度实验平台 | 16 台节点，每台 8×NVIDIA-A800-SXM4-80GB | 未公开（全局缓存实验中每节点按 3M token 容量设定） | 未公开 | 每节点 4×200 Gbps RDMA 网卡 | Mooncake Store，块大小 256 token | [MC1] |
+| arXiv v1 技术报告实验平台 | 每节点 8×NVIDIA-A800-SXM4-80GB（每卡 80 GB HBM），NVLink 互联；节点数随实验而定（如 10P+10D 对比 20 个 vLLM 实例） | 未公开 | 未公开 | RDMA 网卡，节点间互联带宽最高 800 Gbps | Mooncake Store | [MP] |
+| Transfer Engine 带宽测试（40 GB，约 LLaMA3-70B 128k token 的 KV） | 未公开 | 未公开（测试含 DRAM 与显存两类缓冲） | 未涉及 | 4×200 Gbps 与 8×400 Gbps RoCE，分别达 87 GB/s 与 190 GB/s | 未涉及 | [MC1][M] |
+| 开源 SSD Offload 基准（SGLang HiCache + Mooncake） | 单台 DGX，8×NVIDIA A100-SXM4-40GB；Qwen3-8B，TP=1 | 主机 DRAM 总量未公开；Mooncake 分布式内存池 80 GB（`--global_segment_size`），SSD 下沉本地缓冲 20 GB；HiCache L2 为 `--hicache-ratio 2` | 5 块 Samsung NVMe 组 RAID0：3×PM1733 3.84 TB（PCIe Gen4，单盘顺序读 7,000 MB/s）+ 2×PM983 1.92 TB（PCIe Gen3，3,000 MB/s），可用约 14 TB，理论聚合顺序读约 27 GB/s | 2 张 RDMA 网卡，InfiniBand 4X HDR，每张 200 Gb/s | 无（Mooncake 内存池与 SSD 均在本机） | [MC5] |
+| Kimi K2 PD 分离 + 大规模 EP 部署（SGLang + Mooncake） | 128×NVIDIA H200（NVIDIA DGX Cloud 提供），1P1D：prefill 4 节点、decode 12 节点 | 未公开 | 未公开 | RDMA 加速 KV 传输，网卡型号与带宽未公开 | 未公开 | [M][PLMO4] |
+
+上述配置中，KV 实际落地的层是 GPU HBM（实例私有）、各节点 CPU DRAM（Mooncake Store 内存段）以及本地 NVMe SSD（开源 SSD 下沉基准中的 RAID0 阵列）；论文与官方基准都没有使用远端共享存储承载 KV。所查资料（FAST'25 论文、arXiv v1、官方 README 与 SSD 下沉基准、LMSYS Kimi K2 部署博客）均未出现 HDD。
+
 ### 与 SSD / HDD 多级存储的关系（本文分析）
 
 Mooncake 的价值在于把“KV 放在哪一层”和“请求调度到哪里”放在一起决策：Conductor 的代价模型显式计入传输时间，Store 用副本和淘汰决定热数据留在 DRAM，SSD 作为 DRAM 之下的 LOCAL_DISK 副本层。若再往下加 HDD，有几点可直接从公开资料推出：第一，论文的收益条件给出了每台机器需要 6–19 GB/s 级别的有效加载带宽，这一量级远高于单块机械盘，HDD 不适合放在请求关键路径上直接被读；第二，现有 SSD 后端按 256 MB 级的桶聚合写入，写入模式偏向大块顺序，这对容量型介质友好，但桶内对象零散失效会造成空间回收滞后，文档也承认逻辑计数会落后于实际占用；第三，S3 兼容后端可接 Ceph RGW 等对象存储，理论上可把 HDD 集群作为最底层，但官方材料没有任何 HDD 介质的测试，也没有 SSD→HDD 的分层迁移策略。因此较稳妥的定位是：HDD 只承接冷前缀的长期保存，并依赖预取在请求到达前把数据提升到 SSD 或 DRAM。
@@ -103,3 +139,8 @@ Mooncake 的价值在于把“KV 放在哪一层”和“请求调度到哪里�
 - **[MC9]** [Mooncake 官方文档 · Object Storage Offload（采集于 2026-11-18）](https://kvcache-ai.github.io/Mooncake/deployment/object-storage-offload.html)
 - **[MC10]** [Mooncake 官方文档 · P2P Store（采集于 2026-11-18）](https://kvcache-ai.github.io/Mooncake/design/p2p-store.html)
 - **[MP]** [Qin et al. · Mooncake: Kimi’s KVCache-centric Architecture for LLM Serving，2024，v1](https://arxiv.org/html/2407.00079v1)
+- **[PLMO1]** [Mooncake 官方仓库 · v0.3.14（2026-11-03 发布）· mooncake-store/include/types.h（DEFAULT_EVICTION_HIGH_WATERMARK_RATIO=0.90、DEFAULT_EVICTION_RATIO=0.05、默认租约 10000 ms、软 pin 30 分钟）](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-store/include/types.h)
+- **[PLMO2]** [Mooncake 官方仓库 · v0.3.14 · mooncake-store/src/master.cpp（allocation_strategy 默认 random、enable_offload 默认 false 等 master 启动参数）](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-store/src/master.cpp)
+- **[PLMO3]** [vLLM 官方文档 · MooncakeStoreConnector Usage Guide（latest 开发版文档，save_decode_cache、lookup_timeout_s、MOONCAKE_PREFERRED_SEGMENT 等，采集于 2026-11-19）](https://docs.vllm.ai/en/latest/features/mooncake_store_connector_usage/)
+- **[PLMO4]** [LMSYS 官方博客 · Deploying Kimi K2 with PD Disaggregation and Large-Scale Expert Parallelism on 128 H200 GPUs，2025-07-20（采集于 2026-11-19）](https://lmsys.org/blog/2025-07-20-k2-large-scale-ep/)
+- **[SGD]** [SGLang HiCache 设计文档 · 固定提交 c712459e7f82](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/docs/docs/advanced_features/hicache_design.mdx)

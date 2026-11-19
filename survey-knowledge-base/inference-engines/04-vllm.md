@@ -6,7 +6,7 @@
 
 以 `vllm serve` 部署的 V1 在线文本服务为例，一条请求跨过三个边界：API Server 把 HTTP 输入转换成引擎请求，Engine Core 决定本轮为哪些序列计算多少 token，GPU Worker 按计划执行模型。返回方向上，引擎把各请求的新 token 交回前端，由前端解码并向客户端流式输出。下图是单副本、四卡张量并行的实例，四张卡共同执行同一模型副本。 [VL19][VL20]
 
-![vLLM 官方 V1 进程图（TP=4、DP=1）。一个 API Server 对接一个 Engine Core；同一轮调度驱动四个 GPU Worker。](../figures/vllm-v1-process-architecture.jpg)
+![vLLM 官方 V1 进程图（TP=4、DP=1）。一个 API Server 对接一个 Engine Core；同一轮调度驱动四个 GPU Worker。](../figures/vllm-1.jpg)
 
 *vLLM 官方 V1 进程图（TP=4、DP=1）。一个 API Server 对接一个 Engine Core；同一轮调度驱动四个 GPU Worker。* — [原始来源](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/design/arch_overview.md)
 
@@ -44,13 +44,13 @@ vLLM V1 的 APC 采用哈希方案：每个 KV 块的键由**父块哈希、本�
 
 数据结构方面，`BlockPool` 在初始化时一次性创建 `num_gpu_blocks` 个 `KVCacheBlock`。每个块记录 `block_id`、`ref_cnt`、`block_hash`，以及 `prev_free_block` / `next_free_block` 两个指针。空闲队列 `FreeKVCacheBlockQueue` 直接用这两个指针串成双向链表：从中间摘除、在头尾插入都是 O(1)，也不用另建 Python 对象。哈希表 `cached_block_hash_to_block`（类型为 `BlockHashToBlockMap`）把带 KV 组号的哈希映射到具体的块 [VL2][VL6]。
 
-![vLLM 官方设计文档 Automatic Prefix Caching 的组件总览图：Block Pool（KVCacheBlock 列表）、Free Block Queue（只保存头尾指针的双向链表）、Cache Blocks（哈希→块）与 Request Blocks（请求→块）](../figures/vllm-1.png)
+![vLLM 官方设计文档 Automatic Prefix Caching 的组件总览图：Block Pool（KVCacheBlock 列表）、Free Block Queue（只保存头尾指针的双向链表）、Cache Blocks（哈希→块）与 Request Blocks（请求→块）](../figures/vllm-2.png)
 
 *vLLM 官方设计文档 Automatic Prefix Caching 的组件总览图：Block Pool（KVCacheBlock 列表）、Free Block Queue（只保存头尾指针的双向链表）、Cache Blocks（哈希→块）与 Request Blocks（请求→块）* — [原始来源](https://docs.vllm.ai/en/latest/design/prefix_caching/)
 
 控制流分三步，见下图。（1）新请求到来时，调度器先调用 `KVCacheManager.get_computed_blocks()`，经 `KVCacheCoordinator.find_longest_cache_hit()` 沿 `request.block_hashes` 逐块查哈希表，得到最长的全命中前缀。如果整个 prompt 都命中，最后一个 token 仍要重算以产生 logits。（2）`allocate_slots()` 先对命中块执行 `BlockPool.touch()`：`ref_cnt` 加 1，原来为 0 的块从空闲队列中摘除，避免被驱逐。随后 `get_new_blocks()` 用 `popleft_n()` 从队首取新块；取到的块如果还带着哈希，就在此刻经 `_maybe_evict_cached_block()` 从哈希表中删除，这就是“驱逐”。新写满的块由 `cache_full_blocks()` 登记进哈希表。（3）请求结束或被抢占时，`SingleTypeKVCacheManager.free()` 以**逆序**调用 `BlockPool.free_blocks()`。`ref_cnt` 归零后，没有哈希的块用 `prepend_n()` 放回队首优先复用；带哈希的块用 `append_n()` 放到队尾。因为是逆序放回，请求最末尾的块（覆盖的前缀最长、最难被复用）排在前面，最先被淘汰 [VL2][VL6]。V1 的块表只允许追加，同一内容可能短暂存在重复块，等请求释放后才消除 [VL2]。
 
-![vLLM V1 GPU 前缀缓存的数据结构与控制流：请求哈希 → get_computed_blocks / allocate_slots / free → BlockPool 哈希表与 LRU 空闲队列（本文根据 vLLM 固定提交 0c80c3a6 源码 block_pool.py、kv_cache_utils.py、kv_cache_manager.py 绘制）](../figures/vllm-2.svg)
+![vLLM V1 GPU 前缀缓存的数据结构与控制流：请求哈希 → get_computed_blocks / allocate_slots / free → BlockPool 哈希表与 LRU 空闲队列（本文根据 vLLM 固定提交 0c80c3a6 源码 block_pool.py、kv_cache_utils.py、kv_cache_manager.py 绘制）](../figures/vllm-3.svg)
 
 *vLLM V1 GPU 前缀缓存的数据结构与控制流：请求哈希 → get_computed_blocks / allocate_slots / free → BlockPool 哈希表与 LRU 空闲队列（本文根据 vLLM 固定提交 0c80c3a6 源码 block_pool.py、kv_cache_utils.py、kv_cache_manager.py 绘制）* — [原始来源](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/core/block_pool.py)
 
@@ -60,13 +60,13 @@ vLLM V1 的 APC 采用哈希方案：每个 KV 块的键由**父块哈希、本�
 
 同一个 connector 类会被实例化两次：调度进程里一份（`KVConnectorRole.SCHEDULER`），每个 GPU worker 里各一份（`KVConnectorRole.WORKER`）。两边通过 `SchedulerOutput.kv_connector_metadata` 和回传的 `KVConnectorOutput` 交换信息 [VL4][VL7]。调度侧的核心钩子是 `get_num_new_matched_tokens(request, num_computed_tokens)`。它返回两个值：外部缓存还能在本地命中之外补上多少 token，以及是否异步加载。文档要求这个方法可以被重复调用、没有副作用，而且只能把当下确实可加载的前缀算进去。返回 `None` 表示 connector 还没查完，调度器会对该请求执行 `skip_request()`，下一步再问 [VL7][VL8]。之后的顺序是：`allocate_slots(..., num_external_computed_tokens)` 分配块，`update_state_after_alloc()` 记录本次加载计划；如果是异步加载，请求状态置为 `WAITING_FOR_REMOTE_KVS`；最后由 `build_connector_meta()` 打包本步的 load/save 元数据。Worker 侧依次执行 `bind_connector_metadata()`、`handle_preemptions()`、`start_load_kv()`，并在逐层前向中调用 `wait_for_layer_load()` 和 `save_kv_layer()`；前向结束后，`wait_for_save()`、`get_finished()` / `get_transfer_results()`、`get_block_ids_with_load_errors()` 把完成情况和失败的块回报给调度器 [VL7]。
 
-![vLLM 官方文档 Disaggregated Prefilling 一节的 connector 高层设计图：调度进程中的 connector 通过 SchedulerOutput 的 connector_metadata 字段驱动各 worker 进程中的 connector，再经数据传输层与其他实例交换 KV](../figures/vllm-3.png)
+![vLLM 官方文档 Disaggregated Prefilling 一节的 connector 高层设计图：调度进程中的 connector 通过 SchedulerOutput 的 connector_metadata 字段驱动各 worker 进程中的 connector，再经数据传输层与其他实例交换 KV](../figures/vllm-4.png)
 
 *vLLM 官方文档 Disaggregated Prefilling 一节的 connector 高层设计图：调度进程中的 connector 通过 SchedulerOutput 的 connector_metadata 字段驱动各 worker 进程中的 connector，再经数据传输层与其他实例交换 KV* — [原始来源](https://docs.vllm.ai/en/latest/features/disagg_prefill/)
 
 失败处理方面，`KVTransferConfig.kv_load_failure_policy` 的默认值是 `"fail"`，即加载失败的请求直接以错误结束。设为 `"recompute"` 后，调度器在 `_handle_invalid_blocks()` 中把受影响的请求重新排队、重算失败的块 [VL14][VL8]。块级的 `invalid_block_ids` 只适用于单 KV 组模型；有多个 KV 组时，connector 必须改用请求级的 `failed_recving` 上报，否则会直接抛错 [VL8]。请求结束时调度器调用 `request_finished(request, block_ids)`。如果它返回 `True`，表示 connector 还在异步发送或落盘，GPU 块要等 `finished_sending` 回报后才会释放。异步保存不阻塞推理，代价是 GPU 块被占用得更久 [VL7][VL8]。
 
-![KVConnectorBase_V1 在一次 engine step 中的调用顺序：调度侧 get_num_new_matched_tokens → allocate_slots / update_state_after_alloc → build_connector_meta，worker 侧 start_load_kv / save_kv_layer / wait_for_save / get_finished，回到调度侧处理完成、失败与 request_finished（本文根据 vLLM 固定提交 0c80c3a6 源码 kv_connector/v1/base.py 与 v1/core/sched/scheduler.py 绘制）](../figures/vllm-4.svg)
+![KVConnectorBase_V1 在一次 engine step 中的调用顺序：调度侧 get_num_new_matched_tokens → allocate_slots / update_state_after_alloc → build_connector_meta，worker 侧 start_load_kv / save_kv_layer / wait_for_save / get_finished，回到调度侧处理完成、失败与 request_finished（本文根据 vLLM 固定提交 0c80c3a6 源码 kv_connector/v1/base.py 与 v1/core/sched/scheduler.py 绘制）](../figures/vllm-5.svg)
 
 *KVConnectorBase_V1 在一次 engine step 中的调用顺序：调度侧 get_num_new_matched_tokens → allocate_slots / update_state_after_alloc → build_connector_meta，worker 侧 start_load_kv / save_kv_layer / wait_for_save / get_finished，回到调度侧处理完成、失败与 request_finished（本文根据 vLLM 固定提交 0c80c3a6 源码 kv_connector/v1/base.py 与 v1/core/sched/scheduler.py 绘制）* — [原始来源](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/distributed/kv_transfer/kv_connector/v1/base.py)
 

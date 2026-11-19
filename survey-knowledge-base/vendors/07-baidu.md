@@ -81,7 +81,7 @@ export MOONCAKE_PROTOCOL="rdma"
 python -m fastdeploy.entrypoints.openai.api_server --model ${MODEL_NAME} --port 52500 --splitwise-role decode --cache-transfer-protocol rdma --router "0.0.0.0:52700" --enable-output-caching --kvcache-storage-backend mooncake
 ~~~
 
-**源码层面的三级层次与写策略**（develop 分支，采集于 2026-11-18）：命令行 `--kvcache-storage-backend` 的可选值为 `mooncake`、`attention_store`、`file`。设置后会自动开启前缀缓存，且要求 V1 调度器。`--write-policy` 可选 `write_through`、`write_through_selective`（默认，按 `--write-through-threshold` 命中次数阈值写入，默认 2）、`write_back`。 [BD5] `cache_manager/v1` 的注释把层次定义为 Device（GPU）→ Host（CPU）→ Storage，并说明 Storage 中的数据需要先取到 Host。RadixTree 为 Device 和 Host 分别维护可淘汰集合，按 `last_access_time` 选出 LRU 节点；`ref_count` 为 0 的节点才可淘汰。write_back 策略下，Device 块被淘汰时转移到 Host。 [BD6] `file` 后端把每个 KV 键写成目录下的一个 `{key}.pd` 文件，`attention_store` 后端依赖 `attentionstore_sdk` 包。这两个后端目前只在源码中出现，《全局缓存池化》文档只写了 Mooncake。 [BD5][BD6]
+**源码层面的三级层次与写策略**（develop 分支，采集于 2026-11-18；2026-11-19 按提交 `d923caf` 复核）：命令行 `--kvcache-storage-backend` 的可选值为 `mooncake`、`attention_store`、`file`。设置后会自动开启前缀缓存，且要求 V1 调度器。`--write-policy` 可选 `write_through`、`write_through_selective`（参数默认值，按 `--write-through-threshold` 命中次数阈值写入，默认 2）、`write_back`。 [BD5] 但这三种策略只在环境变量 `ENABLE_V1_KVCACHE_MANAGER=1`（默认 0）时可选。默认的旧版 cache manager 会把 `write_policy` 强制改为 `write_through`，含义是请求结束时把整条前缀写入存储后端。 [PLBD1] 新版 `cache_manager/v1` 的注释把层次定义为 Device（GPU）→ Host（CPU）→ Storage，并说明 Storage 中的数据需要先取到 Host。其中 `write_through` 被规范化为阈值为 1 的 `write_through_selective`，写策略管的是 Device→Host 的备份；v1 中写入 Storage 的函数目前仍是 TODO。RadixTree 为 Device 和 Host 分别维护可淘汰集合，按 `last_access_time` 选出 LRU 节点；`ref_count` 为 0 的节点才可淘汰。write_back 策略下，Device 块被淘汰时转移到 Host。 [BD6][PLBD4] `file` 后端把每个 KV 键写成目录下的一个 `{key}.pd` 文件，`attention_store` 后端依赖 `attentionstore_sdk` 包。这两个后端目前只在源码中出现，《全局缓存池化》文档只写了 Mooncake。 [BD5][BD6]
 
 ### 公开性能数据（按原口径）
 
@@ -93,6 +93,45 @@ python -m fastdeploy.entrypoints.openai.api_server --model ${MODEL_NAME} --port 
 | FastDeploy RDMA 库 README [BD4] | 单 ConnectX-7 400G、单线程 | 1K 块 10.67 GB/s；256K 块 45.01 GB/s |
 
 另外，多芯适配稿给出了 Cache 损耗与计费的关系：命中率 80%、命中部分按一折收费时，Cache 损耗必须低于 28.6% 才能抵消折扣造成的收入差额；在总损耗中，由 Cache 管理造成的“间隙损耗”占 80% 以上。 [BD11]
+
+### 放置策略：哪些 KV 放到哪一层
+
+百度的放置决策分三处：千帆托管 API 只把“是否缓存、留多久”交给用户；百舸 / 千帆线上体系由 AttentionStore 与调度器决定层级和节点；开源 FastDeploy 的规则写在源码里。下表按 9 个维度对照，左侧为百舸 AttentionStore / 千帆线上体系，右侧为 FastDeploy（默认的旧版 cache manager，提交 `d923caf`）。
+
+| 维度 | 百舸 AttentionStore / 千帆线上 | FastDeploy（开源） | 证据类型 |
+|---|---|---|---|
+| 层级与介质 | L1 HBM；L2 主机内存（单机数百 GB）；L2.5 本地 SSD（单机 4.5 TB）；L2 + L2.5 已 P2P 池化；L3 分布式存储在建 | GPU 块池；CPU 块池（块数 = `--swap-space` GB ÷ 每块字节数）；存储后端 mooncake / attention_store / file | 官方技术文章 [BD10][BD12]；源码可见 [PLBD1] |
+| 放置单位 | KV Block，用 BlockHash 标识；L2 采用 Page First 布局，便于整页落盘；每块 token 数未公开 | 块，`block_size` 默认 64 token；键为链式哈希（前一块的键参与本块哈希） | 官方文章 [BD10][BD11]；源码可见 [BD3][PLBD2] |
+| 准入 | HiCache L1→L2 用 `write_through_selective`，只写命中过的前缀；百度加了 Ghost List（只保存 64-bit Page Hash），前缀被淘汰后再次重建时若在名单中命中，就直接写入 L2。Prefill 生成的 KV 与 Decode 增量都会回写 | 默认请求结束时整条前缀写入存储，无阈值；输出 token 的 KV 需开启 `--enable-output-caching` 才会写入；请求被抢占时也会写入（`FD_SAVE_OUTPUT_CACHE_FOR_PREEMPTED_REQUEST` 默认 1） | 官方演讲稿 [BD11]；源码可见 [PLBD2][PLBD3] |
+| 写入时机 | P→D 传输与回写 DRAM / SSD 同时进行，异步执行；Decode 增量异步回写到 P 节点 | 存储层：请求结束或被抢占时同步下发写任务（write-through）；CPU 层：GPU 淘汰时换出（evict-to-lower）；源码未设置副本数 | 官方文章 [BD10]；源码可见 [PLBD2][PLBD5] |
+| 降级与淘汰 | LRU（出现在命中率漏斗描述中）；节点侧异步驱逐；触发水位未公开 | 需要 GPU 块时，从 `last_used_time` 最小、`shared_count` 为 0 的叶子开始淘汰；CPU 块足够就换出到 CPU，否则直接丢弃；存储侧的淘汰交给后端 | 官方演讲稿 [BD12]；源码可见 [PLBD2] |
+| 提升与预取 | HBM / DRAM / SSD 并行读取；调度后若请求不在最高命中节点，就预取到本机 L2（本地 SSD→内存，或经 RDMA 拉远端内存）；引擎开始加载 L1 时预取立即停止 | 按 GPU→CPU→存储的顺序匹配；CPU 命中块同步换回 GPU；剩余部分不少于 1 块时，按链式键从存储直接读入新分配的 GPU 块，读任务默认超时 30 s，未命中的块释放后重算 | 官方演讲稿 [BD11]；源码可见 [PLBD2][PLBD5] |
+| 位置选择 | 地域级 Session 亲和；集群内低负载时让请求靠近 Cache，高负载时用池化把 Cache 搬到请求所在节点；跨地域时，未命中请求去低负载地域，长会话留在原地域 | Router 选 PD 实例对；Mooncake 池内由 Master 分配位置，FastDeploy 不指定 | 官方演讲稿 [BD11][BD12]；源码 / 文档 [BD2][PG][PLBD5] |
+| 决策者 | 每个节点的 Agent（AttentionStore 进程）+ 地域级 Master；调度器订阅 KV 事件；用户无控制项 | 引擎内 PrefixCacheManager；存储侧为 Mooncake Master | 官方文章 [BD10][BD11]；源码可见 [PLBD2] |
+| 选择依据 | 命中长度 × 介质读取效率打分；命中概率 + 负载水位；没有公开的显式成本模型 | 只看块是否存在与容量，没有代价模型 | 官方文章 [BD10][BD12]；源码可见 [PLBD2] |
+
+**用户侧放置控制（千帆）**。物理层级和节点未公开。隐式 prompt cache 对用户只有一个效果：系统把重复前缀“路由到处理过相同提示的服务器”，并定期清理一段时间未用的缓存，没有断点或 key 参数。 [BD7] 显式前缀缓存是唯一能由用户控制的部分：用户通过 `/v2/caching` 决定缓存哪段前缀，用 `ttl`（秒，每次使用都会重新计时）决定保留多久，用 DELETE 主动释放，并按小时为存储量付费。 [BD8]
+
+**选择逻辑**。百舸的取舍以命中率为核心。2026-10-21 演讲稿算过一笔账：命中率从 90% 降到 40% 时，Prefill 算力占比会从 10% 升到 60%。 [BD12] 因此线上体系先尽量保证“不丢”：生成的 KV 全部异步回写 DRAM / SSD，单机 4.5 TB 的 SSD 扩大保留窗口，独立进程保证引擎重启后缓存仍在。然后才谈“读得快”：调度器按命中长度和介质读取效率打分，把请求送到最合适的节点；负载均衡把请求分到别的节点时，用预取把数据搬过来，而且预取可以被打断，避免拖慢引擎。L1→L2 的准入较严（selective 加 Ghost List），原因是 L2 带宽和写放大是瓶颈；L2 往下的层把容量放在第一位。FastDeploy 默认采用简单的“结束即写全量”和 LRU 换出，更精细的 selective / write_back 策略只在 v1 cache manager 中出现，而 v1 写 Storage 的路径尚未实现。
+
+**例子：一个 32k token 的多轮对话前缀**。在百舸线上，第一轮请求先按 Session 亲和落到某个地域和集群，由节点 A 的 Prefill 计算；KV 驻留 A 的 HBM，一边传给 Decode，一边异步写入 A 的 DRAM 和 SSD，Decode 新增的 KV 也回写到 A。第二轮请求，如果调度器把它派回 A，HBM / DRAM / SSD 中的块并行读回；如果因负载派到节点 B，B 的 Agent 经 RDMA 从 A 的内存预取到 B 的 L2，B 引擎开始加载 L1 时预取立即停止，没取到的部分现场重算。 [BD10][BD11] 在 FastDeploy 中，同一前缀为 512 个 64-token 块：请求结束时这 512 个块被写入 MooncakeStore；GPU 紧张时 LRU 叶子块先换出到 CPU（如果配置了 `--swap-space`）。下一轮请求依次匹配 GPU、CPU，剩余块从 Mooncake 拉回 GPU，日志中的 `storage_cache_token_num` 记录这部分命中量。 [PLBD2][PG]
+
+### 硬件配置信息
+
+| 场景 / 方案 | 计算（GPU / NPU 型号 × 数量，HBM 容量） | CPU 与主机内存（DRAM 容量） | 本地存储（SSD / NVMe / HDD 型号、数量、容量） | 网络（RDMA / NIC 型号与带宽） | 远端 / 共享存储（服务名与规格） | 来源 |
+|---|---|---|---|---|---|---|
+| 百舸 AttentionStore 系统验证（PD 分离，DeepSeek R1 671B） | 昆仑芯 P800 集群；2 台 Prefill 节点，TP4 / DP4；卡数与 HBM 容量未公开 | AttentionStore 用共享内存（大页、锁页）做主机缓存；容量未公开 | SSD 作主机缓存介质；型号与容量未公开 | 未公开（节点间池化） | 未公开 | [BD10] |
+| AttentionStore 文章中的显存容量估算（示例，非测试环境） | 80GB 显存加速卡：Qwen3-32B（FP16，约 0.25MB/token）扣除 60GB 权重和 5–10GB 运行时开销后，剩余约 10GB，可容纳约 40K token | — | — | — | — | [BD10] |
+| 千帆 / 百舸线上 KV 存储演进（2024–2026） | 未公开 | L2 单机内存 Cache，单机数百 GB，读写约 20 GB/s（2024） | L2.5 SSD Cache，单机 4.5 TB，读写 10–20 GB/s（2025）；型号与盘数未公开 | 2026 Q1 起 L2 + L2.5 P2P 池化（含 UVA），读写带宽 30–40 GB/s；网卡型号未公开 | L3 分布式存储正在引入，规格未公开 | [BD12] |
+| 百舸 HiCache L2 昆仑芯适配（PD 分离，Agent 数据集，未开 L3） | 昆仑芯 P800、P900；示例为 TP=8；HBM 容量未公开 | “多种机型”，NUMA 与 PCIe 拓扑各异；NUMA 绑定测试中 HiCache 容量为 15 / 40 / 80 GB | 未开启 L3 | 远程预取经 RDMA；型号未公开。部分平台两颗 XPU 共享一条 PCIe 上行链路 | — | [BD11] |
+| 百舸 MLA 类 Cache 读写优化 | 未公开型号；每卡经 PCIe 读 1/8 数据，再用 NVLink AllGather 汇聚 | 未公开 | 未公开 | 卡间 NVLink（规格未公开） | — | [BD11] |
+| 百舸 AIAK PD 分离部署 DeepSeek R1（推荐配置） | Hopper 架构算力；Prefill、Decode 各 32 卡，单实例 4 个 Pod（4 台机器）；TP 4、DP 8；`MEM_FRACTION_STATIC` 0.95；HBM 容量未写 | 资源规格推荐 CPU 100 核、内存 1024G | 未公开 | 多机通信，建议开启 RDMA；型号未公开 | BOS 对象存储挂载模型权重（不存 KV） | [BD9] |
+| FastDeploy KVTransferManager RDMA 基准 | 未公开（支持 Hopper、昆仑 XPU、Ampere） | 未公开 | — | 单张 Mellanox ConnectX-7 400G 单端口；单线程 256K 块 45.01 GB/s | — | [BD4] |
+| FastDeploy 全局缓存池化（MooncakeStore） | “支持 CUDA 的 NVIDIA GPU” | 每个 TP 进程向全局池贡献 `global_segment_size`，默认 1GB | 未提及 | 生产环境推荐 RDMA，也可以用 TCP；`rdma_devices` 默认自动检测 | MooncakeStore + Mooncake Master（可用 etcd / redis 做多 master 高可用） | [PG] |
+| FastDeploy 前缀缓存与 file 后端 | GPU 一级缓存 | `--swap-space`（GB），按加载模型后机器可用内存设置 | `file` 后端写入 `FILE_BACKEND_STORAGE_DIR`（默认 `/tmp/fastdeploy`），介质不限 | — | — | [BD1][PLBD1] |
+| 千帆 prompt cache / 前缀缓存 | 未公开 | 未公开 | 未公开 | 未公开 | 未公开 | [BD7][BD8] |
+
+来源中 KV 实际落地的层是：加速卡 HBM（L1）、节点共享内存 DRAM（L2，单机数百 GB）、本地 SSD（L2.5，单机 4.5 TB），以及经 RDMA P2P 池化的其他节点 DRAM / SSD。开源侧还有 MooncakeStore 分布式内存池。L3 分布式存储仍在建设，BOS 只用于存放模型权重。所读资料都没有提到 HDD。
 
 ### 与 KV Cache 多级存储（SSD / HDD 下沉）的关系
 
@@ -123,3 +162,8 @@ AttentionStore 与 Meetup 材料是百度智能云的官方技术文章，没有
 - **[BD11]** [百度智能云技术站（掘金官方账号）· 《极致 KVCache 推理服务效能优化与多芯软硬协同实践》，SGLang Meetup 北京站演讲整理，2026-10-15](https://juejin.cn/post/7696696661667151908)
 - **[BD12]** [百度智能云技术站（掘金官方账号）· 《让推理服务稳定可控，从负载治理到 KVCache 全域感知》，SGLang Meetup 北京站演讲整理，2026-10-21](https://juejin.cn/post/7698734382195015722)
 - **[PG]** [PaddlePaddle FastDeploy · 全局缓存池化（Global Cache Pooling）官方文档，develop 分支，采集于 2026-11-18](https://github.com/PaddlePaddle/FastDeploy/blob/develop/docs/features/global_cache_pooling.md)
+- **[PLBD1]** [PaddlePaddle FastDeploy · 源码 fastdeploy/config.py（CacheConfig：ENABLE_V1_KVCACHE_MANAGER=0 时 write_policy 强制为 write_through、num_cpu_blocks 由 swap_space 推算）及 engine/args_utils.py、envs.py，提交 d923caf（2026-09-24），采集于 2026-11-19](https://github.com/PaddlePaddle/FastDeploy/blob/d923caf15e1eb0da8e2efd75b0152e65cefeeddd/fastdeploy/config.py)
+- **[PLBD2]** [PaddlePaddle FastDeploy · 源码 cache_manager/prefix_cache_manager.py（request_match_blocks、free_block_ids_async、write_cache_to_storage），提交 d923caf（2026-09-24），采集于 2026-11-19](https://github.com/PaddlePaddle/FastDeploy/blob/d923caf15e1eb0da8e2efd75b0152e65cefeeddd/fastdeploy/cache_manager/prefix_cache_manager.py)
+- **[PLBD3]** [PaddlePaddle FastDeploy · 源码 engine/sched/resource_manager_v1.py（请求结束 / 抢占时写入存储），提交 d923caf（2026-09-24），采集于 2026-11-19](https://github.com/PaddlePaddle/FastDeploy/blob/d923caf15e1eb0da8e2efd75b0152e65cefeeddd/fastdeploy/engine/sched/resource_manager_v1.py)
+- **[PLBD4]** [PaddlePaddle FastDeploy · 源码 cache_manager/v1/cache_manager.py 与 radix_tree.py（write_through_selective / write_back、Device→Host→Storage），提交 d923caf（2026-09-24），采集于 2026-11-19](https://github.com/PaddlePaddle/FastDeploy/blob/d923caf15e1eb0da8e2efd75b0152e65cefeeddd/fastdeploy/cache_manager/v1/cache_manager.py)
+- **[PLBD5]** [PaddlePaddle FastDeploy · 源码 cache_manager/cache_tasks.py（读写存储任务默认 timeout 30s）与 transfer_factory/mooncake_store/mooncake_store.py，提交 d923caf（2026-09-24），采集于 2026-11-19](https://github.com/PaddlePaddle/FastDeploy/blob/d923caf15e1eb0da8e2efd75b0152e65cefeeddd/fastdeploy/cache_manager/cache_tasks.py)

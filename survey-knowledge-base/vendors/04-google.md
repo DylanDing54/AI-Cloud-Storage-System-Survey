@@ -121,13 +121,53 @@ GKE 在 Next '26（2026-04-23）上宣布了跨 RAM、Local SSD 与 GCS / Lustre
 | Managed Lustre 外部 KV Cache（2025-11-01） | A3-Ultra（8×H200）上服务 DeepSeek-R1；50K 上下文、约 75% 命中、KV 总量约 3.4 TiB；基线为 1 TiB 主机内存；Lustre 性能档 1000 MB/s per TiB；32 个 I/O 线程并行读 | 总吞吐 +75%，平均 TTFT 降低 40% 以上；按 1M TPS 负载测算 TCO 降低 35%，约少用 40% 加速器 |
 | 多节点 KV 卸载到 Managed Lustre（2026-07-01） | 6 节点 A3 Mega，Llama-3.3-70B；50,000 token 提示、256 token 问题、512 token 输出；95% 命中 | TCO 节省超过 50%，GPU 小时需求降低近 60%；CPU RAM + Lustre 组合相对仅 CPU 卸载 TTFT 改善约 40%、端到端时延降低 30% |
 
-来源： [GCP13][GCP14]。前一篇建议以 `O_DIRECT` 访问 Lustre、绕过通用文件系统缓存，并提高 KV 分块文件的读取并行度；还指出在 GPU 机型上 Lustre 由本地 SSD 辅助，而 TPU 机型没有本地 SSD，Lustre 的作用更关键。 [GCP13] 后一篇给出了 vLLM `MultiConnector` 配置（CPU 层 `cpu_bytes_to_use` 加 `SharedStorageOffloadingSpec` 文件系统层，`threads_per_gpu: 32`），并说明 `llmd_fs_backend` 只负责把 KV 块写入 Lustre、本身不删除旧文件，因此另设 PVC Evictor 按 LRU 回收：建议每 72 TB Lustre 容量部署 1 个副本，示例阈值为清理触发时驱逐 10 分钟内未访问的文件。 [GCP14]
+来源： [GCP13][GCP14]。前一篇建议以 `O_DIRECT` 访问 Lustre、绕过通用文件系统缓存，并提高 KV 分块文件的读取并行度；还指出在 GPU 机型上 Lustre 由本地 SSD 辅助，而 TPU 机型没有本地 SSD，Lustre 的作用更关键。 [GCP13] 后一篇给出了 vLLM `MultiConnector` 配置（CPU 层 `cpu_bytes_to_use` 加 `SharedStorageOffloadingSpec` 文件系统层，`threads_per_gpu: 32`），并说明 `llmd_fs_backend` 只负责把 KV 块写入 Lustre、本身不删除旧文件，因此另设 PVC Evictor 按 LRU 回收（llm-d v1.0 文档注明该独立后端已由 vLLM `TieringOffloadingSpec` 的 `fs` 层取代，`fs` 层同样不淘汰数据 [PLGG1]）：建议每 72 TB Lustre 容量部署 1 个副本，示例阈值为清理触发时驱逐 10 分钟内未访问的文件。 [GCP14]
 
 ![Google Cloud 博客「Scaling LLM Inference: Multi-Node KV Cache Offloading with GKE and Managed Lustre」架构原图：vLLM KV Connector → Shared Storage Offloading Connector → Managed Lustre，PVC Evictor 按 LRU 回收](../figures/google-4.png)
 
 *Google Cloud 博客「Scaling LLM Inference: Multi-Node KV Cache Offloading with GKE and Managed Lustre」架构原图：vLLM KV Connector → Shared Storage Offloading Connector → Managed Lustre，PVC Evictor 按 LRU 回收* — [原始来源](https://cloud.google.com/blog/topics/developers-practitioners/scaling-llm-inference-multi-node-kv-cache-offloading-with-gke-managed-lustre)
 
 作为补充，Google 工程师 Danna Wang 在 LMCache 官方博客（2025-10-07）发布了 GKE 上的节点内分层测试：A3 Mega（8×H100）、Llama-3.3-70B，HBM 640Gi、CPU RAM 1Ti、Local SSD 5Ti。缓存总量 4.0M–4.3M tokens 时，100K 系统提示下“HBM + CPU RAM + Local SSD”使 TTFT 降低 79%、输入吞吐提升 264%；但在缓存总量 12.6M–13.7M tokens、10K 系统提示的场景下，最佳配置的平均 TTFT 反而比纯 HBM 高 121%，吞吐仍提升 23%。 [GCP16] 这一结果说明较慢的层并非在所有负载下都改善首 token 时延。
+
+### 放置策略：哪些 KV 放到哪一层
+
+Google 的放置策略要分两部分看。Gemini 托管服务公开了“内存层 → 持久层”的两层结构和用户可控的开关、TTL，但没有公开介质与淘汰算法；GKE / llm-d 栈（GKE Inference Gateway 由 llm-d Router 驱动）则在 llm-d v1.0 官方文档中把层级、粒度、淘汰策略、路由打分都写成了可配置参数。下表左侧以 Gemini 托管服务为先、llm-d 为后。
+
+| 维度 | 该系统做法 | 证据类型与引用 |
+|---|---|---|
+| 层级与介质 | Gemini 隐式缓存：in-memory 层（不落盘）+ durable 持久层（保存“由输入计算得到的 KV 表示”，静态加密）；持久层介质与容量未公开。显式 `CachedContent`：区域资源，介质未公开。llm-d：HBM → CPU RAM（主层，文档估算约 250 GB/GPU）→ 二级层（共享文件系统 `fs`、S3 兼容对象存储 `obj`、对等节点 CPU 内存 `p2p`）；GKE 方案中文件系统层为 Managed Lustre 或 Local SSD | Gemini 官方明确两层、介质未公开 [GCP1][GCP5]；llm-d 官方文档 [PLGG1]；GKE 官方博客 [GCP14][GCP15] |
+| 放置单位 | Gemini：前缀；最小 2,048–6,144 tokens（随模型）；Gemini API 对 Gemini 4 多轮按“请求边界”写入，新增不足 2,050 tokens 时不缓存完整上一请求。llm-d：KV block，卸载块 `block_size` 须为 GPU 块的整数倍，文档建议 256–512 tokens；近似路由按 64 token（字符估算）切块哈希 | 官方明确 [GCP1][GCP7][PLGG1][PLGG3] |
+| 准入 | Gemini 隐式：达到最小长度的前缀自动尝试缓存（best effort）；显式：用户创建 `CachedContent` 时指定内容。llm-d 原生路径：从 HBM 逐出的块进入 CPU 层，再由 CPU 层下沉到二级层，无热度阈值。decode 输出 KV：Gemini 未公开 | 官方明确 [GCP1][GCP7][PLGG1] |
+| 写入时机 | Gemini：持久层在“内存缓存容量耗尽时”写入，即淘汰时下沉。llm-d：GPU→CPU 用 DMA 异步搬运，二级层读写异步、多线程（`n_read_threads` / `n_write_threads` 默认 16）；Mooncake Store 写入先同步落 DRAM、再异步持久化到 SSD | 官方明确 [GCP5][PLGG1] |
+| 降级与淘汰 | Gemini 隐式：内存层容量回收即驱逐到持久层，两层最晚 24 小时删除；显式按 TTL（默认 60 分钟）过期后垃圾回收。llm-d CPU 层：`eviction_policy` 取 `lru`（默认）或 `arc`；`fs` 层自身不淘汰，需 PVC Evictor 等外部控制器按阈值清理（GKE 博客示例为按 LRU 清理 10 分钟未访问文件）；Mooncake Master 在池满 95%（`eviction_high_watermark_ratio`）时每轮逐出 5% | Gemini 官方明确（算法未公开） [GCP1][GCP5]；llm-d / GKE 官方明确 [PLGG1][GCP14] |
+| 提升与预取 | Gemini：未公开。llm-d：只有 CPU 层可直连 GPU，二级层命中后经 CPU 层回到 GPU；二级层按 `secondary_tiers` 顺序查找；P2P 拉取失败或部分命中则退回重算 | 官方明确 [PLGG1][PLGG4] |
+| 位置选择 | Gemini：按项目隔离；隐式数据在处理请求的区域，global 端点可由任一区域服务；Vertex AI 自身用 GKE Inference Gateway 做前缀感知 + 负载感知路由。llm-d：EPP 打分——近似实现（EPP 内 LRU 索引）或精确实现（订阅 vLLM KVEvents 的全局索引，`BlockStored` / `BlockRemoved` 带设备层信息）；按层加权 `gpu = 1.0`、`cpu = 0.8` | 官方明确 [GCP1][GCP5][GCP11][PLGG2][PLGG3] |
+| 决策者 | Gemini：用户（显式缓存内容与 TTL、项目级 `cacheConfig` 的 `DURABLE` / `EPHEMERAL` / `disableCache`）+ 服务端（隐式缓存的写入、下沉、淘汰）。llm-d：推理引擎连接器管层间流动，EPP 管位置 | 官方明确 [GCP5][PLGG1][PLGG2] |
+| 选择依据 | Gemini：用户按“读取 10%（或 5%）输入价 + 显式存储 token·小时费”做成本取舍；服务端依据未公开。llm-d：文档给出经验规则——CPU DRAM 大于 HBM 时始终启用 CPU 层；工作集超出单节点、需要跨节点共享或重启后保留时才加存储层；前提是存储网络足够快；路由综合前缀分与队列、KV 利用率（Vertex AI 例中权重 3:3:2 调为 3:5:2）。无显式“加载 vs 重算”在线成本模型 | 官方明确 [GCP1][GCP6][GCP11][PLGG1] |
+
+**选择逻辑。**Gemini 隐式缓存是典型的“淘汰时下沉”：前缀先留在内存，内存回收时转入持久层而不直接丢弃，这样“隔较长时间才复用”的请求仍能命中，而两层共用 24 小时的硬上限把持久层限定为小时级的复用窗口。用户无法指定层级，只能整体选择 `DURABLE`（两层）或 `EPHEMERAL`（仅内存），或改用显式缓存，用按 token·小时计费的存储费换取确定的保留期。 [GCP1][GCP5]
+
+llm-d 把“放哪层”交给推理引擎的连接器，把“放哪台机器”交给路由器。原生路径中 CPU 层是唯一能直连 GPU 的层，所有二级层都经它中转，因此 CPU 层的容量（`cpu_bytes_to_use`）与淘汰策略（LRU / ARC）决定了什么会继续下沉；共享文件系统层不负责淘汰，容量由存储系统或 PVC Evictor 管理。路由侧的层加权（GPU 1.0、CPU 0.8）意味着同样的前缀长度下，持有 GPU 驻留块的 Pod 得分更高，但持有 CPU 块的 Pod 仍明显优于需要重算的 Pod；精确实现通过 KVEvents 跟踪块在哪个设备层，并用默认 2 秒的推测性索引弥补事件延迟。 [PLGG1][PLGG2]
+
+**例子（本文按上述官方规则推演）。**一个 32k token 的多轮对话前缀：在 Gemini 4 Hydrogen 的隐式缓存下，每一轮只要新增至少 2,050 tokens，就以上一请求为边界写入内存层；用户离开后若内存被回收，这段 KV 表示转入持久层，最晚 24 小时删除，回来时若仍在则按缓存读取价计费，物理介质不可见。在 GKE + llm-d（`block_size: 256`、CPU 层 + Managed Lustre `fs` 层）上：32k tokens 约占 128 个卸载块，先在 HBM；被逐出后异步进入本 Pod 的 CPU 层；CPU 层按 LRU 再淘汰时写入 Lustre 上的共享目录；下一轮请求到达时，EPP 优先选 GPU 上仍有完整前缀链的 Pod，其次是 CPU 层持有的 Pod；若都没有，任何 Pod 都能经 CPU 层把这 128 个块从 Lustre 读回，而不必重算；Lustre 上的文件则在 PVC Evictor 清理时按访问时间回收。
+
+### 硬件配置信息
+
+下表列出本章来源提到的硬件配置。Google Cloud 机型规格页在本次采集中无法从本机访问，因此只写来源原文给出的数值，未给出的写“未公开”。
+
+| 场景 / 方案 | 计算（GPU / NPU 型号 × 数量，HBM 容量） | CPU 与主机内存（DRAM 容量） | 本地存储（SSD / NVMe / HDD 型号、数量、容量） | 网络（RDMA / NIC 型号与带宽） | 远端 / 共享存储（服务名与规格） | 来源 |
+|---|---|---|---|---|---|---|
+| Gemini 隐式 / 显式上下文缓存（托管） | 未公开 | 未公开（内存层“只存于内存”） | 未公开（持久层介质未说明） | 未公开 | 未公开 | [GCP1][GCP5] |
+| Vertex AI 采用 GKE Inference Gateway（Qwen3-Coder、DeepSeek V3.1） | 未公开 | 未公开 | 未公开 | 未公开 | — | [GCP11] |
+| Managed Lustre 外部 KV Cache 基准：DeepSeek-R1，50K 上下文，约 75% 命中，KV 总量约 3.4 TiB | A3-Ultra：8 × H200，8 × 141 GB HBM | 内存基线为 1 TiB 主机内存用于 KV | GPU 机型上 Lustre 由本地 SSD 辅助；容量未公开 | 未公开 | Managed Lustre，1000 MB/s per TiB 性能档；TCO 模型按 73 台 A3-Ultra、每台 18 TiB Lustre 容量 | [GCP13] |
+| 多节点 KV 卸载到 Managed Lustre：Llama-3.3-70B，50,000 token 提示，95% 命中 | 6 节点 A3 Mega（部署示例节点选择器 `nvidia-h100-80gb`；节点池示例 a3-megagpu-4g、a4-highgpu-4g） | CPU 层 `cpu_bytes_to_use`（数值随部署设置） | 未公开 | 未公开 | Managed Lustre，RWX PVC 容量范围 9000Gi–84016000Gi（随性能档）；PVC Evictor 运行在 c4-standard-16 节点池（每 Pod 请求 12 CPU、8Gi 内存） | [GCP14] |
+| LMCache on GKE 节点内分层：Llama-3.3-70B-Instruct，LMCache v0.3.3 | A3 Mega：`nvidia-h100-mega-80gb`，HBM 640Gi | CPU RAM 1Ti | Local SSD 5Ti（经 emptyDir 作临时存储） | 未公开 | — | [GCP16] |
+| llm-d 1.0：agent 编码负载，前缀感知路由 + 主机内存卸载 | Ironwood TPU（TPU 7x），数量未公开 | 未公开 | TPU 机型无本地 SSD（Lustre 博客） | 未公开 | Managed Lustre 作为 HBM 与主机内存之下的共享远端层 | [GCP12][GCP13] |
+| llm-d 1.0 公告中的客户案例 | 1,000 颗 TPU v6e（每日生成 token 从 14.7 亿增至 59.7 亿） | 未公开 | 未公开 | 未公开 | — | [GCP12] |
+| llm-d v1.0 文档的 KV 卸载推荐 | 不限型号（GPU / TPU） | CPU RAM 约 250 GB/GPU；示例 Pod 请求 400 GB CPU 内存；示例 `cpu_bytes_to_use: 107374182400`（100 GiB） | 本地 NVMe 可作 `fs` 层（仅本节点） | P2P 层与 Mooncake Store 生产部署需 RDMA（TCP 为后备） | 共享文件系统（Lustre、CephFS、IBM Storage Scale、AWS EFS 等）或 S3 兼容对象存储 | [PLGG1] |
+| GKE Next '26 自动 KV 分层基准（10K / 50K 系统提示） | 未公开 | RAM 层，容量未公开 | Local SSD 层，容量未公开 | 未公开 | GCS / Lustre | [GCP15] |
+
+KV 实际落地的位置：托管 Gemini 为“内存层 + 持久层”（介质未公开）；GKE 方案中为 GPU / TPU HBM、主机 DRAM、Local SSD（仅 GPU 机型）和 Managed Lustre，GCS 在 Next '26 公告中被列为分层目标之一。所读 Google 来源均未出现 HDD。
 
 ### 与 KV Cache 多级存储（SSD / HDD 下沉）的关系（本文分析）
 
@@ -160,3 +200,7 @@ Google 托管服务公开的层级是“内存层 + 持久层”，持久层明�
 - **[GCP17]** [Google Cloud · Gemini Enterprise Agent Platform：Measure Provisioned Throughput（Context caching 小节，采集于 2026-11-18）](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/provisioned-throughput/measure-provisioned-throughput)
 - **[GCP18]** [Google Cloud · Gemini Enterprise Agent Platform：Use open models（MaaS，Context caching 小节，采集于 2026-11-18）](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/maas/use-open-models)
 - **[PC]** [Google Cloud · Intro to Context Caching（官方 notebook）](https://github.com/GoogleCloudPlatform/generative-ai/blob/main/gemini/context-caching/intro_context_caching.ipynb)
+- **[PLGG1]** [llm-d 官方文档（v1.0）· Architecture › KV Cache Management › KV-Cache Offloading（采集于 2026-11-19）](https://llm-d.ai/docs/architecture/kv-management/kv-offloader)
+- **[PLGG2]** [llm-d 官方文档（v1.0）· Architecture › KV Cache Management › KV-Cache Indexer（KVEvents、按层加权打分、推测性索引，采集于 2026-11-19）](https://llm-d.ai/docs/architecture/kv-management/kv-indexer)
+- **[PLGG3]** [llm-d 官方文档（v1.0）· Architecture › KV Cache Management › Prefix-Cache Aware Routing（近似 / 精确两种实现，采集于 2026-11-19）](https://llm-d.ai/docs/architecture/kv-management/prefix-cache-aware-routing)
+- **[PLGG4]** [llm-d 官方文档（v1.0）· Architecture › KV Cache Management（四大支柱概览，采集于 2026-11-19）](https://llm-d.ai/docs/architecture/kv-management)

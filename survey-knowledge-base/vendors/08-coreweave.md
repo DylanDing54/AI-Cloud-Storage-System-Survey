@@ -57,7 +57,7 @@ CoreWeave AI Object Storage 是 CoreWeave 自建自运营的全托管对象存�
 **LOTA（Local Object Transport Accelerator）**是这一服务的核心。它是安装在 CKS 集群每个 GPU / CPU 节点上的智能代理，客户端只需把 S3 端点从主端点 `https://cwobject.com` 换成集群内的 `http://cwlota.com`，其余无需改动 [CWV2][CWV5]。其工作方式如下 [CWV2][CWV3]：
 
 - **认证后绕行网关。**LOTA 先向 Object Storage Gateway 认证请求、确认授权，并附带本节点位置信息；网关可能返回对象的直接路径，此时 LOTA 绕过网关直接访问存储后端，以获得最高吞吐。
-- **分布式节点本地缓存。**对象被缓存在集群各节点的本地 NVMe SSD 上，整个集群共享同一缓存，容量随节点数线性增长，每个节点默认贡献 3 TiB。放置时以整个对象（或整个上传分片）为单位计算目标节点，避免一次读取跨多个节点；未命中时，从后端取回的数据分成两路并发流，一路返回客户端，一路写入缓存。即使客户端只请求某个分片中的一段字节范围，LOTA 也会缓存整个分片，例如 100 MB 对象按 5 MB 分片上传时只缓存命中的 5 MB 分片。淘汰策略为 LRU，并保持强一致。
+- **分布式节点本地缓存。**对象被缓存在集群各节点的本地 NVMe SSD 上，整个集群共享同一缓存，容量随节点数线性增长，每个节点默认贡献 3 TiB。放置时以整个对象（或整个上传分片）为单位计算目标节点，避免一次读取跨多个节点；未命中时，从后端取回的数据分成两路并发流，一路返回客户端，一路写入缓存。即使客户端只请求某个分片中的一段字节范围，LOTA 也会缓存整个分片，例如 100 MB 对象按 5 MB 分片上传时只缓存命中的 5 MB 分片。淘汰策略为 LRU，并保持读写一致；LOTA 只缓存大于 4 MB 的对象，更小的对象绕过缓存 [CWV3]。
 - **只加速读。**LOTA 只加速 HTTP GET，写操作被代理到存储后端。可以通过 `Cache-Control: no-cache / no-store` 让单个请求不进缓存或完全绕过缓存，用于测试。
 - **跨区读与预热。**LOTA 可以加速读取位于其他可用区或区域的桶，首次读取后在本地缓存；对同可用区的集群自动预置，跨区集群则可以对对象发起带 `Range: bytes=0-0` 的 HeadObject，主动把整对象拉入分布式 NVMe 缓存。官方称预热后推理服务可在大模型上实现亚秒级 TTFT [CWV2][CWV4]。
 - **安全注意。**LOTA 被定位为不持有用户密钥的“不受信守护进程”，缓存盘以 LUKS 加密；客户端与 LOTA 之间、以及 LOTA 实例之间的流量默认不加密，依赖网络隔离，官方建议只在运行可信负载的集群中使用，并以 NetworkPolicy 限制对 LOTA Pod 的访问 [CWV1][CWV2]。
@@ -94,6 +94,39 @@ extra_config:
 ~~~
 
 与同一页面的 AWS S3 示例（64 个 CRT I/O 线程）相比，CoreWeave 示例开启了异步加载、把 I/O 线程提高到 320、关闭 HTTP/2，并以 LOTA 端点为 bucket 域名 [L]。在 LMCache 新的 MP 模式下，相同的后端应改用 `--l2-adapter '{"type": "s3", ...}'` 的写法，且对象命名规则与旧版不兼容 [L]。CoreWeave 的性能指南还建议每次请求至少读 15 MB（低于 1 MB 时性能明显下降），并以每节点约 300 个并发作为起点调优 [CWV3]。按上一章的估算，256 token 的 chunk 对中等规模的 GQA 模型通常在几十 MB 量级，大体符合这一建议；对 KV 更紧凑的模型，则需增大 chunk（本文分析）。
+
+### 放置策略：哪些 KV 放到哪一层
+
+这个案例的放置决策由两方分担：LMCache 在推理节点上决定“哪些 KV chunk 写到远端、何时读回”，CoreWeave AI Object Storage 的 LOTA 在存储侧透明地决定“哪些对象留在集群 NVMe 缓存、放在哪个节点”。联合案例本身没有公开 LMCache 的具体配置；下表中 LMCache 一侧以 LMCache S3 文档里专门给出、并链接本案例的 CoreWeave 示例配置为准，存储一侧以 CoreWeave 官方文档为准。
+
+| 维度 | 该系统做法 | 证据类型与引用 |
+|---|---|---|
+| 层级与介质 | GPU HBM（vLLM）→（可选）LMCache 本地 CPU 内存 → LOTA 分布式节点本地 NVMe 缓存（每节点默认 3 TiB，容量随节点数线性增长）→ AI Object Storage 后端（数据 + 校验分片，单可用区；后端介质未公开）。CoreWeave 示例配置中 `local_cpu: False`，即不启用本地 CPU 缓存层；Cohere 实际是否启用未公开 | 官方明确 [CWV1][CWV2][L]；案例实际配置未公开 [CW] |
+| 放置单位 | LMCache：`chunk_size: 256` token 为一个 chunk，每个 chunk 一个对象（MP 模式对象名为 `<model>@<kv_rank>@<chunk_hash>`）；LOTA：以整个对象或整个上传分片（part）为单位缓存，只缓存大于 4 MB 的对象，更小的对象绕过缓存 | 官方明确 [L][CWV2][CWV3] |
+| 准入 | LMCache：`save_unfull_chunk: False`（S3 后端必须为 False），末尾不满 256 token 的部分不写远端；其余 chunk 全部写入，无热度阈值。LOTA：读到的对象（≥4 MB）都进缓存；同可用区集群还会自动预置新对象；`Cache-Control: no-store` 可让单个请求绕过缓存。decode 输出 KV 是否写入：未公开 | 官方明确 [L][CWV2][CWV3][CWV4]；decode KV 未公开 |
+| 写入时机 | LMCache 在 prefill 后把 KV 序列化写入对象存储；LOTA 不加速写，PUT 直接代理到后端，写入本身不进入 NVMe 缓存（同可用区集群由服务自动预置）；后端读未命中时“一路返回客户端、一路写入缓存”（read-through），只写一份到该节点 | 官方明确 [CW][CWV2] |
+| 降级与淘汰 | LOTA：LRU，容量满即淘汰，被淘汰后下次从桶所在可用区重新读取。对象存储：S3 文档称 MP 模式的 S3 L2 adapter 才提供一等淘汰（实现 S3 DeleteObject），可按 `max_capacity_gb` 与 `eviction`（文档示例 `LRU`、`trigger_watermark: 0.85`、`eviction_ratio: 0.2`）淘汰；也可用桶生命周期策略按时间过期对象。Hot / Warm / Cold 只是按访问时间的计费分档，性能相同 | 官方明确 [CWV1][CWV2][CWV4][L] |
+| 提升与预取 | LMCache：`enable_async_loading: True`，请求到达后即开始流式读取，未就绪时让引擎稍后重试，GPU 继续处理其他请求；`blocking_timeout_secs: 10`；读回对象大小不符时按未命中处理并重算该 chunk（MP 文档）。LOTA：可用 `Range: bytes=0-0` 的 HeadObject 主动预置 | 官方明确 [CW][L][CWV4] |
+| 位置选择 | LMCache 远端层对所有推理节点共享，不需要缓存感知路由即可跨节点复用；LOTA 为每个对象计算一组“兼容节点”，再按负载均衡选定缓存节点，读取时转发到该节点；跨可用区 / 跨区域的桶在首次读取后缓存于本地集群 | 官方明确 [CW][CWV2] |
+| 决策者 | LMCache（推理引擎侧的独立缓存层）决定写什么、读什么；LOTA（存储服务侧代理）决定 NVMe 缓存内容与位置；用户可调 chunk 大小、I/O 线程（示例 `s3_num_io_threads: 320`）、生命周期策略与预置 | 官方明确 [L][CWV2] |
+| 选择依据 | 案例的论据是“异步加载 + 每 8-GPU 节点 8.5–10 GB/s 吞吐”使远端加载可被计算掩盖；CoreWeave 性能指南建议单次读取 ≥15 MB、每节点约 300 并发。没有公开“加载 vs 重算”的在线成本模型 | 官方明确 [CW][CWV3] |
+
+**选择逻辑。**这里没有“按热度逐级下沉”的设计：LMCache 把每个满 256 token 的 chunk 都写到对象存储，相当于把远端当作唯一的持久 KV 层，依赖对象存储的容量与跨节点共享，换来扩缩容后会话仍可恢复、缓存可在推理节点间流动。 [CW] 读路径的性能则交给存储侧：LOTA 把读过（或同可用区自动预置）的对象放到集群 NVMe 上，并以 LRU 管理，因此热点 KV 会自然停留在离 GPU 最近的 NVMe 层，冷 KV 回落到后端。 [CWV2][CWV4] 两层各自的淘汰互不感知：LOTA 淘汰只影响读时延，不会丢数据；对象存储中的 KV 若不设 MP adapter 淘汰或桶生命周期策略，则会一直留存并计费。
+
+本文分析：LOTA 只缓存大于 4 MB 的对象，单个 KV 对象的大小取决于模型的 KV 字节数 / token × 256。KV 较小的模型（例如强 GQA 或 MLA 模型）若单个 chunk 不足 4 MB，读路径会绕过 LOTA、直接访问后端，此时应增大 `chunk_size`；这也与 CoreWeave“单次读 ≥15 MB”的建议一致。 [CWV3]
+
+**例子（按上述官方配置推演）。**一个 32k（32,768）token 的 RAG 多轮对话前缀：首轮 prefill 在 GPU 上完成，LMCache 将其切成 128 个 256-token chunk，序列化后通过 `cwlota.com` 端点直接 PUT 到 AI Object Storage 后端（LOTA 不缓存写入）；同可用区的集群随后会自动把这些对象预置进 LOTA 的 NVMe 缓存。下一轮请求不论被路由到哪个推理节点，LMCache 都会异步发起读取：命中的对象由 LOTA 选定的缓存节点从 NVMe 返回，被 LRU 淘汰的对象则从后端读回并重新写入某个节点的 NVMe；GPU 在等待期间继续解码其他请求。若该会话数周未被访问，对象仍在后端，只是计费档位自动降到 Cold，性能不变。
+
+### 硬件配置信息
+
+| 场景 / 方案 | 计算（GPU / NPU 型号 × 数量，HBM 容量） | CPU 与主机内存（DRAM 容量） | 本地存储（SSD / NVMe / HDD 型号、数量、容量） | 网络（RDMA / NIC 型号与带宽） | 远端 / 共享存储（服务名与规格） | 来源 |
+|---|---|---|---|---|---|---|
+| Cohere / CoreWeave / LMCache 联合测试（Command A，vLLM） | CoreWeave GPU 基础设施，以“8-GPU 节点”为单位；GPU 型号与数量未公开 | 未公开 | 未公开 | 未公开 | CoreWeave AI Object Storage：每个 8-GPU 节点 8.5–10 GB/s；对照组为 S3 Express（配置未公开） | [CW] |
+| LMCache 的 CoreWeave 示例配置 | 未指定 | `max_local_cpu_size: 50`，但 `local_cpu: False` | — | 未指定；S3 客户端 320 个 I/O 线程，关闭 HTTP/2 | `s3://test-127.cwlota.com`，区域 `US-WEST-04A` | [L] |
+| LOTA 分布式缓存 | 部署在 CKS 集群全部 GPU / CPU 节点 | 未公开 | 节点本地 NVMe SSD，每节点默认 3 TiB；缓存盘以 LUKS 加密 | LOTA 实例间流量默认不加密，依赖网络隔离 | AI Object Storage 后端：数据 + 校验分片存放在独立存储服务器，元数据多副本，单可用区桶；后端介质未公开 | [CWV1][CWV2] |
+| CoreWeave 内部 Warp 基准（性能指南） | 30 节点集群（节点类型未公开） | 未公开 | 未公开 | 未公开 | 9,000 个并发操作（每节点 300）可获得高吞吐 | [CWV3] |
+
+KV 实际落地的位置：GPU HBM（vLLM）、LOTA 管理的节点本地 NVMe（仅读缓存）与 AI Object Storage 后端；示例配置未启用主机 DRAM 缓存层。CoreWeave 未公开对象存储后端是否使用 HDD，所读来源中也没有出现 HDD。
 
 ### 对 KV Cache 多级存储的启示与局限
 

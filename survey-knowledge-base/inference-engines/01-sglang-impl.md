@@ -6,7 +6,7 @@
 
 以文本生成请求为例，服务入口将输入交给 `TokenizerManager`，后者把文本编码为 token ID，并将请求送给 `Scheduler`。调度器持有活动请求，在组织下一批计算时匹配已缓存的前缀、为剩余 token 分配位置，再交给模型执行。生成的 token ID 经 `DetokenizerManager` 还原为文本，由前端返回给客户端。因而，前缀树和内存池影响的是调度器为一次前向计算准备哪些 token 与 KV 槽位。 [SGI30][SGI16]
 
-![SGLang 整体架构（本文依据固定提交绘制）。上半部是一次在线请求及返回路径，下半部区分 HiCache 的分层回填与 P/D 分离的跨实例传输。](../figures/sglang-runtime-hardware.svg)
+![SGLang 整体架构（本文依据固定提交绘制）。上半部是一次在线请求及返回路径，下半部区分 HiCache 的分层回填与 P/D 分离的跨实例传输。](../figures/sglang-impl-1.svg)
 
 *SGLang 整体架构（本文依据固定提交绘制）。上半部是一次在线请求及返回路径，下半部区分 HiCache 的分层回填与 P/D 分离的跨实例传输。* — [原始来源](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers)
 
@@ -39,7 +39,7 @@
 
 RadixAttention 最早发表于 LMSYS 2024-01-17 的博客。它的做法是请求结束后不丢弃 KV，而是把 prompt 和生成结果的 KV 都留在一棵基数树里：键是 token 序列，值是 KV 张量；树结构在 CPU 上维护，开销很小；淘汰采用 LRU，从叶子开始递归删除，并配合缓存感知调度提高命中率。博客发表时，GPU 上的 KV 按“每页 1 个 token”的分页布局存放 [SGI20]。下图是博客中的九步示例：节点按需分裂以共享系统提示词，内存不足时淘汰最久未用的叶子。
 
-![LMSYS 官方博客 RadixAttention 示意图（Figure 4）：两个对话会话、一批 few-shot 查询和 self-consistency 采样到来时，基数树逐步插入、分裂与按 LRU 淘汰节点（绿色为新增，蓝色为本步访问，红色为被淘汰）](../figures/sglang-impl-1.png)
+![LMSYS 官方博客 RadixAttention 示意图（Figure 4）：两个对话会话、一批 few-shot 查询和 self-consistency 采样到来时，基数树逐步插入、分裂与按 LRU 淘汰节点（绿色为新增，蓝色为本步访问，红色为被淘汰）](../figures/sglang-impl-2.png)
 
 *LMSYS 官方博客 RadixAttention 示意图（Figure 4）：两个对话会话、一批 few-shot 查询和 self-consistency 采样到来时，基数树逐步插入、分裂与按 LRU 淘汰节点（绿色为新增，蓝色为本步访问，红色为被淘汰）* — [原始来源](https://lmsys.org/blog/2024-01-17-sglang/)
 
@@ -50,7 +50,7 @@ RadixAttention 最早发表于 LMSYS 2024-01-17 的博客。它的做法是请�
 - **lock_ref 引用计数**：`inc_lock_ref(node)` 从该节点一直走到根，逐个加 1；某节点从 0 变为 1 时，它的 token 数从 `evictable_size_` 转入 `protected_size_`。`dec_lock_ref` 反向操作。根节点的 `lock_ref` 固定为 1。只有没有未淘汰子节点、且 `lock_ref==0` 的节点才进入 `evictable_leaves` 集合 [SGI1]。
 - **evict**：用 `evictable_leaves` 构建最小堆，优先级由 `eviction_strategy.get_priority(node)` 给出。LRU 取 `last_access_time`，LFU 取 `(hit_count, last_access_time)`，此外还有 FIFO、MRU、FILO、priority、SLRU、T-LRU 等策略。每弹出一个叶子，就调用 `token_to_kv_pool_allocator.free_segment(x.value)` 归还槽位，再 `_delete_leaf`；父节点如果因此没有子节点且未被锁，就加入堆，直到腾出 `num_tokens`。策略由 `--radix-eviction-policy` 选择，默认 `lru` [SGI1][SGI8][SGI9]。
 
-![SGLang RadixCache 树与 ReqToTokenPool / PagedTokenToKVPoolAllocator / MHATokenToKVPool 的数据结构关系。本文根据 SGLang 固定提交源码绘制（radix_cache.py、memory_pool.py、allocator/paged.py）](../figures/sglang-impl-2.svg)
+![SGLang RadixCache 树与 ReqToTokenPool / PagedTokenToKVPoolAllocator / MHATokenToKVPool 的数据结构关系。本文根据 SGLang 固定提交源码绘制（radix_cache.py、memory_pool.py、allocator/paged.py）](../figures/sglang-impl-3.svg)
 
 *SGLang RadixCache 树与 ReqToTokenPool / PagedTokenToKVPoolAllocator / MHATokenToKVPool 的数据结构关系。本文根据 SGLang 固定提交源码绘制（radix_cache.py、memory_pool.py、allocator/paged.py）* — [原始来源](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/mem_cache/radix_cache.py)
 
@@ -66,7 +66,7 @@ SGLang 用两级间接寻址实现前缀共享。第一级是 `ReqToTokenPool.re
 
 下图按顺序画出一条请求从进入到结束的 KV 处理过程。
 
-![一条请求的 KV 生命周期：入队匹配 → 缓存感知排序 → 准入加锁 → 槽位分配 → 前向（含分块 checkpoint）→ 写回前缀树 → 释放 → LRU 淘汰。本文根据 SGLang 固定提交源码绘制（scheduler.py、schedule_policy.py、common.py、allocation.py、radix_cache.py）](../figures/sglang-impl-3.svg)
+![一条请求的 KV 生命周期：入队匹配 → 缓存感知排序 → 准入加锁 → 槽位分配 → 前向（含分块 checkpoint）→ 写回前缀树 → 释放 → LRU 淘汰。本文根据 SGLang 固定提交源码绘制（scheduler.py、schedule_policy.py、common.py、allocation.py、radix_cache.py）](../figures/sglang-impl-4.svg)
 
 *一条请求的 KV 生命周期：入队匹配 → 缓存感知排序 → 准入加锁 → 槽位分配 → 前向（含分块 checkpoint）→ 写回前缀树 → 释放 → LRU 淘汰。本文根据 SGLang 固定提交源码绘制（scheduler.py、schedule_policy.py、common.py、allocation.py、radix_cache.py）* — [原始来源](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/mem_cache/common.py)
 
@@ -80,7 +80,7 @@ SGLang 用两级间接寻址实现前缀共享。第一级是 `ReqToTokenPool.re
 
 官方设计文档把 GPU 显存、主机内存和分布式存储分别称为 L1、L2、L3。L1、L2 属于单个实例私有，L3 是否在实例间共享取决于后端的配置。元数据组织在“HiRadixTree”中：每个节点记录本地 L1 / L2 的精确地址，L3 的元数据不保存也不持续同步，需要时实时向后端查询 [SGD][SGI21]。代码层面，该固定提交中已经找不到早期版本的 `HiRadixCache` 类。开启 `--enable-hierarchical-cache` 后，`create_unified_radix_cache()` 调用 `UnifiedRadixCache.init_hicache()`，后者挂载继承自 `HiCacheController` 的 `HybridCacheController` 和主机池 [SGI11][SGI12]。树节点 `UnifiedTreeNode` 为每个组件保存一个 `ComponentData`，其中包括 `value`（L1 槽位）、`host_value`（L2 槽位）、`lock_ref` 和 `host_lock_ref`。Full 组件的 `host_value` 不为空即视为已备份（`backuped`），`value` 为空即视为已从 L1 淘汰（`evicted`），两者组合出“仅 L1 / L1+L2 / 仅 L2”三种驻留状态 [SGI13]。
 
-![HiCache 三级数据流：L1→L2 备份与写策略、L2→L3 持久化、L3→L2 预取、L2→L1 层级重叠回载，以及节点驻留状态。本文根据 SGLang 固定提交源码绘制（unified_radix_cache.py、unified_tree_core.py、managers/cache_controller.py、hicache_storage.py）](../figures/sglang-impl-4.svg)
+![HiCache 三级数据流：L1→L2 备份与写策略、L2→L3 持久化、L3→L2 预取、L2→L1 层级重叠回载，以及节点驻留状态。本文根据 SGLang 固定提交源码绘制（unified_radix_cache.py、unified_tree_core.py、managers/cache_controller.py、hicache_storage.py）](../figures/sglang-impl-5.svg)
 
 *HiCache 三级数据流：L1→L2 备份与写策略、L2→L3 持久化、L3→L2 预取、L2→L1 层级重叠回载，以及节点驻留状态。本文根据 SGLang 固定提交源码绘制（unified_radix_cache.py、unified_tree_core.py、managers/cache_controller.py、hicache_storage.py）* — [原始来源](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers/cache_controller.py)
 

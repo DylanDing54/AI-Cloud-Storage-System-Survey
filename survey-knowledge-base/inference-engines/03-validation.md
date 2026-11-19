@@ -21,7 +21,7 @@
 
 WD × Solidigm 的热恢复由 DRAM 服务，Seagate × SK hynix 的后续多轮由 SSD 命中；它们支持设计方向，却不能替代 SGLang + HDD 的冷读测试。MEXT 的预取思路、Meta TMO 的压力反馈和 KVU 的设备路径，可作为后续控制策略参照。
 
-![WD / Solidigm 原技术简报第 3 页：用于说明去掉前置层后必须单独测量的性能差异](../figures/wd-2.png)
+![WD / Solidigm 原技术简报第 3 页：用于说明去掉前置层后必须单独测量的性能差异](../figures/validation-1.png)
 
 *WD / Solidigm 原技术简报第 3 页：用于说明去掉前置层后必须单独测量的性能差异* — [原始来源](https://documents.westerndigital.com/content/dam/doc-library/en_us/assets/public/western-digital/collateral/tech-brief/technical-brief-kv-cache-offload-across-storage-tiers-wd.pdf)
 

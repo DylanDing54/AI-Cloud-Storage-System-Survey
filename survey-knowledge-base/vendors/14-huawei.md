@@ -12,7 +12,7 @@
 
 | 产品 / 项目 | 层次 | KV 所在介质 | 官方材料 |
 |---|---|---|---|
-| UCM（开源） | 推理引擎插件 + Store 抽象 | 主机 DRAM 缓冲、本地 / NFS 文件系统、3FS、Mooncake 等 | GitHub 仓库与文档 [HWI1][HWI2] |
+| UCM（开源） | 推理引擎插件 + Store 抽象 | 主机 DRAM 缓冲、本地 / NFS 文件系统、3FS、Mooncake / YuanRong 内存池等 | GitHub 仓库与文档 [HWI1][HWI2][PLHW1] |
 | AI 数据平台 / OceanStor A800 | 共享存储系统 | OceanStor 外置存储，PB 级 | 华为新闻稿 [HWI6][HWI7] |
 | OceanStor M900 AI 记忆存储 | 超节点 KV 专用存储 | 显存 / 内存 → SSD，经灵衢互联 | 华为新闻稿 [HWI8] |
 | 华为云 EMS | 云服务（CloudMatrix384） | 跨节点 DRAM 池 + EVS SSD | 产品页、CloudMatrix384 论文 [HWI10][HWI11] |
@@ -26,7 +26,7 @@ UCM 由 ModelEngine-Group 在 GitHub 开源（仓库创建于 2025-07-10，MIT �
 
 *UCM 官方仓库 README 架构图：灰色为 vLLM 0.9.2 已有类，绿色为 UCM 新增组件（UcmSparseBase 及 ESA / GSA / KVStar 等稀疏算法、UcmKVStoreBase 及 Local / NFS / Mooncake / 3fs / DRAM 等 Store）* — [原始来源](https://github.com/ModelEngine-Group/unified-cache-management/blob/main/docs/source/_static/images/idea.png)
 
-README 对图中三个核心抽象的解释是：`UcmSparseBase` 是各类稀疏算法的基类，像 KV Connector 一样在 scheduler 与 `layer.py` 中挂钩子，执行稀疏 KV 块的加载、转储与计算；`SparseKVManager` 允许不同算法自定义 KV 块分配；`KVStoreBase` 把稀疏算法与外部存储解耦，用“块 ID + 偏移”标识数据，因此同一接口也天然支持前缀缓存，并通过 `KVStoreConnector` 接到 vLLM 的 `KVConnectorBase_V1`。NFSStore 是参考实现，可把 KV 存到单机本地文件系统或多机 NFS 挂载点。 [HWI1]
+README 对图中三个核心抽象的解释是：`UcmSparseBase` 是各类稀疏算法的基类，像 KV Connector 一样在 scheduler 与 `layer.py` 中挂钩子，执行稀疏 KV 块的加载、转储与计算；`SparseKVManager` 允许不同算法自定义 KV 块分配；`KVStoreBase` 把稀疏算法与外部存储解耦，用“块 ID + 偏移”标识数据，因此同一接口也天然支持前缀缓存，并通过 `KVStoreConnector` 接到 vLLM 的 `KVConnectorBase_V1`。README 把 NFSStore 作为参考实现，可把 KV 存到单机本地文件系统或多机 NFS 挂载点；当前文档中 V1 工厂的内置入口则是 `UcmPipelineStore` 和对外名为 `UcmNfsStore` 的 `UcmPcStoreV1` 包装器，正常场景推荐 `Cache|Posix` 管线。 [HWI1][HWI2][PLHW1]
 
 稀疏注意力文档给出的核心思路是：把完整 KV 卸载到专用 KV 存储，由稀疏算法挑出与当前上下文相关的关键 KV，只把这部分加载回 HBM。典型流程为 prefill 时把完整 KV 从 HBM 转储到存储；decode 时检索最相关的块并加载，同时把新生成的块写回。scheduler 侧的 UCMSparse 充当“稀疏预算控制器”，文档举例 ESA 只需普通注意力 20%–30% 的块。 [HWI4]
 
@@ -34,9 +34,9 @@ README 对图中三个核心抽象的解释是：`UcmSparseBase` 是各类稀疏
 
 当前中文文档把一次复用拆成“块匹配、数据加载、新块保存”三步。Connector 按缓存粒度把 token 序列生成链式块标识，标识包含前缀关系，并纳入模型目录名、并行配置、dtype、rank 等执行设置；只有完整块进入持久化路径。Scheduler 侧先查询外部连续命中的块，换算成可复用 token 数；Worker 侧再把数据加载到引擎提供的缓冲区，Attention 使用前必须等加载完成。文档特别指出，“查到块”“加载完成”“保存结束”是三个不同事件：查找时存在的块，加载时仍可能缺失或读取失败。 [HWI2]
 
-存储侧以 Pipeline 组合“阶段”。`Cache|Posix` 中，Cache 阶段管理主机缓冲以及设备与主机之间的搬运，Posix 阶段管理主机与文件系统之间的 I/O；按层传输让下一层加载与当前层计算重叠。可选后端包括文件系统流水线、NFS Connector、3FS（`Cache|Ds3fs`）、Mooncake 共享内存池（可组合为 `Mooncake|Posix`：优先读 Mooncake，未命中交给 Posix，dump 同时写入 Posix）以及 KV 压缩（`Cache|Compress|Posix`）。引擎侧接入 vLLM / vLLM-Ascend 与 SGLang（SGLang 由 HiCache 管理主机缓存，适配器直接使用 Posix 阶段）。 [HWI2][HWI3]
+存储侧以 Pipeline 组合“阶段”。`Cache|Posix` 中，Cache 阶段管理主机缓冲以及设备与主机之间的搬运，Posix 阶段管理主机与文件系统之间的 I/O；按层传输让下一层加载与当前层计算重叠。可选后端包括文件系统流水线、NFS Connector、3FS（`Cache|Ds3fs`）、Mooncake 共享内存池（可组合为 `Mooncake|Posix`：优先读 Mooncake，未命中交给 Posix，dump 同时写入 Posix）、YuanRong 内存池（`YuanRong` / `YuanRong|Posix`）以及 KV 压缩（`Cache|Compress|Posix`）。引擎侧接入 vLLM / vLLM-Ascend 与 SGLang（SGLang 由 HiCache 管理主机缓存，适配器直接使用 Posix 阶段）。 [HWI2][HWI3]
 
-容量与回收方面，文档给出的默认主机缓冲为：原生 Cache 启用共享缓冲时 256 GiB，关闭共享时每个 worker 32 GiB，当前 vLLM Connector 启用共享缓冲时 128 GiB；`posix_capacity_gb: 0` 表示不启用基于容量的垃圾回收，正数只是逻辑预算、不预留文件系统空间，vLLM 路径下 Posix GC 由 DP0 scheduler 负责。配置示例如下（取自官方 Pipeline 文档）： [HWI3]
+容量与回收方面，文档给出的默认主机缓冲为：原生 Cache 启用共享缓冲时 256 GiB，关闭共享时每个 worker 32 GiB，当前 vLLM Connector 启用共享缓冲时 128 GiB；`posix_capacity_gb: 0` 表示不启用基于容量的垃圾回收，正数只是逻辑预算、不预留文件系统空间，vLLM 路径下 Posix GC 由 DP0 scheduler 负责；启用后按“已用 ≥ 容量 × 0.7 触发、每轮删 10%、按文件 mtime 选最冷”回收（详见下文放置策略一节）。配置示例如下（取自官方 Pipeline 文档）： [HWI3]
 
 ~~~yaml
 # 出处（据此整理） [HWI3] https://github.com/ModelEngine-Group/unified-cache-management/tree/main/docs/docs-site/docs/zh/developer-guide/cache-configuration
@@ -94,13 +94,52 @@ KVU 属于计算模组产品线。IT之家 2026-07-23 报道 WAIC 2026 展示时
 | M900 SSD 耐久 | 最高 24 DWPD，寿命提升 16 倍 | 新闻稿，未给出基线介质 [HWI8] |
 | KVU 读写 | 40GB/s 顺序读，500 万 IOPS，10μs 写时延 | 媒体报道，未给出块大小与队列深度 [HW][HK] |
 
+### 放置策略：哪些 KV 放到哪一层
+
+华为的 KV 放置分两条路径。UCM 开源，规则可以直接在源码里查到；以下源码引用固定在 main 分支提交 `863dfc2`（2026-09-20）。EMS 的规则来自 CloudMatrix384 论文 4.4 节。OceanStor M900 和 KVU 只公开了产品层面的描述。
+
+| 维度 | 该系统做法 | 证据类型与引用 |
+|---|---|---|
+| 层级与介质 | UCM：HBM（引擎管理）→ 主机 DRAM 缓冲（Cache 阶段，默认 128/256 GiB 共享或每 worker 32 GiB）→ 文件系统（本地盘 / NFS / 3FS，Posix 阶段）；也可以换成 Mooncake / YuanRong 内存池（可再接 Posix 落盘）。EMS：HBM → 48 节点 CPU 侧 DRAM 池 → EVS 云盘 SSD。M900：显存 / 内存 → SSD，单集群 64PB | UCM 官方文档与源码 [HWI3][PLHW1]；论文 [HWI11]；新闻稿 [HWI8] |
+| 放置单位 | UCM：以引擎块为单位（示例 `--block_size 128`），用链式哈希作为块 ID，只持久化完整块，块内再切成 shard 传输。EMS：每页 128–512 token，键由 token 序列加前缀哈希组成，相同块只存一份 | 官方文档 / 源码可见 [HWI2][PLHW2]；论文 [HWI11] |
+| 准入 | UCM：请求长度低于 `persist_token_threshold`（默认 0）时既不查也不存；只 dump 提示词部分的新块（范围截止于 `num_token_ids`），不写 decode 输出。没有按热度设的准入门槛。EMS：存 prefill 产生的新块；对 R1 这类推理模型，decode 阶段的 KV 一般不存 | 源码可见 [PLHW2][PLHW1]；论文 [HWI11] |
+| 写入时机 | UCM `Cache\|Posix`：先等设备事件，D2H 拷入主机缓冲，再异步提交文件写入，相当于逐层或逐块的异步写穿。`Mooncake\|Posix` 在 dump 时同时写 Mooncake 和 Posix，`replica_num` 默认 1。EMS：新块异步写回，并且全部写入 EVS | 源码可见 [PLHW4]；官方文档 [PLHW6]；论文 [HWI11] |
+| 降级与淘汰 | UCM 主机缓冲用环形游标加访问位（CLOCK / 二次机会）复用节点。Posix GC 在已用容量 ≥ `posix_capacity_gb` × `posix_gc_trigger_threshold_ratio`（0.7）时触发，每轮删除 10%，按文件 mtime 选最冷的文件；命中会经 `utime` 刷新热度。Mooncake 示例使用 0.9 高水位、每次淘汰 10%、60 s 租约。EMS：DRAM 用 LRU 加容量阈值，SSD 满后按类 LRU 策略删除 | 源码可见 [PLHW3][PLHW4]；官方文档 [PLHW1][PLHW6]；论文 [HWI11] |
+| 提升与预取 | UCM：先按前缀连续查找（`lookup_on_prefix`），在主机缓冲中命中就直接 H2D，否则 Posix 读入缓冲后再 H2D；layerwise 模式下本层计算与下一层加载流水重叠。加载失败时把对应块标为无效，交由引擎重算。EMS：经 UB 直接装入 NPU 内存 | 官方文档 / 源码 [HWI2][PLHW2]；论文 [HWI11] |
+| 位置选择 | UCM：由 `storage_backends` 指定挂载点；多实例共享同一目录时，只能由一个实例负责 GC。EMS：全局一致性哈希把键映射到 MP Server，论文明确不做缓存亲和路由 | 官方文档 [PLHW1]；论文 [HWI11] |
+| 决策者 | UCM：vLLM / SGLang 内的 Connector 和 Store（SGLang 的主机层由 HiCache 管理）。EMS：MP Controller（DHT 视图）+ MP Server。M900：存储侧的“KV-Aware”调度 | 官方文档 [HWI2]；论文 [HWI11]；新闻稿 [HWI8] |
+| 选择依据 | UCM 不用显式成本模型，文档只给出“省下的计算时间要超过查询和传输开销”这一定性原则。稀疏路径按注意力相关性决定哪些块留在 HBM。M900 称按“KV 数据价值”预测生命周期，算法未公开 | 官方文档 [HWI2][PLHW5]；新闻稿 [HWI8] |
+
+**选择逻辑。**UCM 的前缀缓存路径基本是“全量准入、靠容量回收”：除了按长度阈值过滤，所有完整的提示词块都会写到主机缓冲和文件层，后面再由主机缓冲的 CLOCK 和 Posix 的 mtime 冷度 GC 去回收。这样设计的好处是放置决策简单，进程重启后数据还在。代价是写入量和提示词总量成正比，文件层的写放大和容量回收都由 GC 承担。查找到的命中块会被刷新 mtime（包括其他 TP rank 上的块），所以 GC 的效果接近按最近使用淘汰。
+
+UCM 稀疏注意力的放置依据是“相关性”，不是“复用”。prefill 时把完整 KV 转储到 Store；decode 时 GSA 等算法始终在 HBM 保留初始窗口和最近窗口，中间部分按每层的 `top_k_ratio_per_layer`（示例配置中间层为 0.3）选块加载。也就是说，同一请求内部的冷 KV 也会被主动挪出 HBM。 [HWI4][PLHW5]
+
+EMS 选的是另一种取舍：DRAM 池按一致性哈希打散，SSD 全量持久化，DRAM 只做 LRU 缓存。论文认为，UB 让访问远端 DRAM 的代价足够低，所以可以不做亲和调度，以此换取负载均衡和更高的池化利用率。 [HWI11]
+
+**例子。**以一个 32,768 token 的多轮对话前缀为例。在 UCM `Cache|Posix`、`block_size` 为 128 的配置下，它是 256 个完整块。首轮 prefill 后，这些块先 D2H 进入主机缓冲，再写成 Posix 文件。下一轮先看 vLLM HBM 前缀缓存能命中多少，剩余部分做外部连续查找：块还在主机缓冲里就直接 H2D，已被 CLOCK 换出就从文件读回；如果文件已被 GC 删除，就从断点开始重算。本轮 decode 产生的回复 KV 不会写出。在 EMS 中，若按每页 512 token 计算，同一前缀是 64 个块，按哈希分散到各节点的 DRAM，同时写入 EVS；DRAM 淘汰后，下次命中从 EVS 读回。
+
+### 硬件配置信息
+
+| 场景 / 方案 | 计算（GPU / NPU 型号 × 数量，HBM 容量） | CPU 与主机内存（DRAM 容量） | 本地存储（SSD / NVMe / HDD 型号、数量、容量） | 网络（RDMA / NIC 型号与带宽） | 远端 / 共享存储（服务名与规格） | 来源 |
+|---|---|---|---|---|---|---|
+| CloudMatrix384 超节点（EMS Context Caching 平台） | 384 × 昇腾 910（双 die，8 个封装内存堆栈；每节点 8 颗），HBM 容量正文未给出 | 192 × 鲲鹏 CPU（每节点 4 颗），DRAM 容量未公开 | 未公开 | UB 平面全互联；RDMA 平面（仅 NPU 接入）；擎天卡接 VPC 平面，单节点访问 EVS 通常低于 400 Gbps | EMS DRAM 池 + EVS 云盘，48 节点聚合最高 48 × 400 Gbps；另有 OBS、SFS | [HWI11] |
+| UCM 示例：DeepSeek-V4-Flash（CUDA） | 单节点 8 × B200 或 B300 | `cache_buffer_capacity_gb: 128`（两个 64 GiB Store），容器 shm 160 GiB | 宿主机挂载目录 `/mnt/ucm-cache`，介质未指定 | 未公开 | 无 | [PLHW7] |
+| UCM 示例：DeepSeek-V4-Flash（Ascend） | Atlas 800 A2，8 × 64 GB NPU | 同上，128 GiB 主机缓冲 | 同上 | 未公开 | 无 | [PLHW7] |
+| UCM 示例：Qwen3.8-27B | 2 × 80 GB CUDA GPU（TP2），或 Atlas 800 A2 8 × 64 GB NPU（TP8） | 主机缓存分别预留 160 GiB / 256 GiB | 挂载目录，介质未指定 | 未公开 | 无 | [PLHW8] |
+| 湖北移动现网测试（UCM） | 昇腾 A3 超节点，卡数未公开 | 未公开 | 未公开 | 未公开 | OceanStor A800，规格未公开 | [HWI7] |
+| AI 数据平台部署形态 | 未公开 | 未公开 | 未公开 | 未公开 | 一体化：OceanStor A800；分离式：数据引擎节点 + OceanStor Dorado | [HWI6] |
+| OceanStor M900 AI 记忆存储 | 面向超节点 NPU | CPU、网络、盘控“三芯合一” | SSD，型号未公开；单集群 64PB；最高 24 DWPD | 灵衢网络，NPU 一跳直通，60 μs，单集群 40 TB/s | 本身即共享 KV 池 | [HWI8] |
+| KVU 计算模组（报道） | 未公开 | 自带 CPU | SSD：顺序读 40 GB/s，500 万 IOPS，写时延 10 μs | 灵衢协议 | 未公开 | [HW][HK] |
+
+KV 实际落在 HBM、主机 / 池化 DRAM（UCM Cache 缓冲、EMS 内存池）和 SSD（EVS 云盘、Posix 挂载的本地盘或 NFS、M900、KVU）上。所有来源都没有提到 HDD。
+
 ### 与 KV Cache 多级存储（SSD / HDD 下沉）的关系
 
 本文分析：华为官方材料覆盖了从 HBM 到 SSD 的完整层级，但没有 HDD 层。EMS 是“DRAM 池 + EVS SSD 全量持久化 + LRU”的经典两级结构，论文明确写出 EVS 单节点带宽有限、需靠 48 节点并行聚合，这恰好说明慢层可用的前提是块足够细、分布足够广。M900 则走专用硬件路线，把 SSD 访问做成原生 KV 语义并直通 NPU，同时用生命周期预测控制写放大与耐久。UCM 的 Store / Pipeline 抽象（`Cache|Posix`、`Mooncake|Posix`）在接口上允许把文件系统后端放在任何介质上，理论上可以挂接 HDD 支撑的 NFS 或分布式文件系统，但官方文档未给出 HDD 相关测试。对 HDD 下沉而言，可借鉴的是 EMS 的“写穿到持久层 + 上层 LRU”以及 M900 的“按价值预测生命周期”两种策略。
 
 ### 资料边界
 
-UCM、M900、AI 数据平台和湖北移动数据均来自华为官方新闻稿或开源仓库，属于厂商自报，未独立复现；“首 Token 时延降低 90%、吞吐提升 22 倍”未公开测试条件。UCM 于 2025 年 8 月发布的时间与场合，本轮只见于媒体报道，未找到华为官方原文。KVU 仍仅有媒体报道；EMS 的 support 文档受访问验证拦截，EMS 内容以产品页和 CloudMatrix384 论文为准（采集于 2026-11-18）。
+UCM、M900、AI 数据平台和湖北移动数据均来自华为官方新闻稿或开源仓库，属于厂商自报，未独立复现；“首 Token 时延降低 90%、吞吐提升 22 倍”未公开测试条件。UCM 于 2025 年 8 月发布的时间与场合，本轮只见于媒体报道，未找到华为官方原文。KVU 仍仅有媒体报道；EMS 的 support 文档受访问验证拦截，EMS 内容以产品页和 CloudMatrix384 论文为准（采集于 2026-11-18）。UCM 放置规则按提交 `863dfc2` 的源码核对，后续版本可能变化；M900 “KV-Aware”生命周期预测和 KVU 的放置算法均未公开（采集于 2026-11-19）。
 
 ## 本章资料
 
@@ -117,3 +156,11 @@ UCM、M900、AI 数据平台和湖北移动数据均来自华为官方新闻稿�
 - **[HWI9]** [华为新闻稿 · 以灵衢互联为核心，打造集群与超节点协同的新计算架构，2026-09-17](https://www.huawei.com/cn/news/2026/9/hc-lingqu-agent-ai)
 - **[HWI10]** [华为云 · 弹性内存存储 EMS 产品页（采集于 2026-11-18）](https://www.huaweicloud.com/product/ems.html)
 - **[HWI11]** [Huawei 等 · Serving Large Language Models on Huawei CloudMatrix384（arXiv 2506.12708v3，2025-06）](https://arxiv.org/abs/2506.12708)
+- **[PLHW1]** [UCM 官方文档 · 配置参数参考（中文，提交 863dfc2，采集于 2026-11-19）](https://github.com/ModelEngine-Group/unified-cache-management/blob/863dfc2ab469174cdedcd3f5ae7c93af1abadcf9/docs/docs-site/docs/zh/reference/config-parameters.md)
+- **[PLHW2]** [UCM 源码 · ucm/integration/vllm/ucm_connector.py（persist_token_threshold、lookup_on_prefix、load/dump 块范围；提交 863dfc2）](https://github.com/ModelEngine-Group/unified-cache-management/blob/863dfc2ab469174cdedcd3f5ae7c93af1abadcf9/ucm/integration/vllm/ucm_connector.py)
+- **[PLHW3]** [UCM 源码 · Posix 阶段 shard_gc.cc / hotness_tracker.cc（按 mtime 选最冷文件、utime 刷新热度；提交 863dfc2）](https://github.com/ModelEngine-Group/unified-cache-management/tree/863dfc2ab469174cdedcd3f5ae7c93af1abadcf9/ucm/store/posix/cc)
+- **[PLHW4]** [UCM 源码 · Cache 阶段 trans_buffer.cc / dump_queue.cc（主机缓冲 CLOCK 复用、D2H 后写后端；提交 863dfc2）](https://github.com/ModelEngine-Group/unified-cache-management/tree/863dfc2ab469174cdedcd3f5ae7c93af1abadcf9/ucm/store/cache/cc)
+- **[PLHW5]** [UCM 官方文档 · GSA: Hash-Aware Top-k Attention（提交 863dfc2，采集于 2026-11-19）](https://github.com/ModelEngine-Group/unified-cache-management/blob/863dfc2ab469174cdedcd3f5ae7c93af1abadcf9/docs/source/user-guide/sparse-attention/gsa.md)
+- **[PLHW6]** [UCM 官方文档 · Mooncake Store 缓存配置（中文，提交 863dfc2，采集于 2026-11-19）](https://github.com/ModelEngine-Group/unified-cache-management/blob/863dfc2ab469174cdedcd3f5ae7c93af1abadcf9/docs/docs-site/docs/zh/developer-guide/cache-configuration/mooncake.md)
+- **[PLHW7]** [UCM 官方文档 · 模型导览 DeepSeek（DeepSeek-V4-Flash UCM 示例，中文，提交 863dfc2）](https://github.com/ModelEngine-Group/unified-cache-management/blob/863dfc2ab469174cdedcd3f5ae7c93af1abadcf9/docs/docs-site/docs/zh/user-guide/model-tour/deepseek/index.md)
+- **[PLHW8]** [UCM 官方文档 · 模型导览 Qwen（Qwen3.8-27B UCM 示例，中文，提交 863dfc2）](https://github.com/ModelEngine-Group/unified-cache-management/blob/863dfc2ab469174cdedcd3f5ae7c93af1abadcf9/docs/docs-site/docs/zh/user-guide/model-tour/qwen3/index.md)

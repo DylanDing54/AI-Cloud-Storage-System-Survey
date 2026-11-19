@@ -90,6 +90,38 @@ Meta Engineering 2025-10-17 的文章《Scaling LLM Inference》介绍了支撑 
 
 表中 P 为已在 KV Cache 中的 token 数，T 为新 token 数（摘自论文 Table 4）。论文结论是 TTFT 与持久化 KV 的缺失率近似成正比，缺失率低于 5% 时 pass-Q 更快，高于 5% 时 pass-KV 更快。 [META5] 这组数据量化了“保住历史 KV”对多轮长上下文 TTFT 的价值：1% 缺失率时的 TTFT 约为全量重算的 1/11 至 1/14。不过，两份资料讨论的持久化 KV 都位于 GPU HBM 内，均未描述把 KV 卸载到 CPU DRAM、SSD 或远端存储的机制。
 
+### 放置策略：哪些 KV 放到哪一层
+
+Meta 公开的放置逻辑分两类。一类是主机内存页的放置：TMO / Senpai 负责 DRAM → zswap → SSD，TPP 负责本地 DRAM ↔ CXL 内存。另一类是 LLM 推理 KV 的放置，只见于上下文并行（CP）论文，所有 KV 都留在 GPU HBM 内，按 CP rank 切分。Meta 没有公开过把 KV 卸载到 CPU DRAM、SSD 或远端存储的方案。
+
+| 维度 | TMO / Senpai（主机内存页） | LLM 推理 KV（CP 论文） | 证据类型与引用 |
+|---|---|---|---|
+| 层级与介质 | DRAM → zswap（DRAM 内的压缩池，zstd + zsmalloc）→ NVMe SSD swap；文件页直接丢弃，需要时从文件系统重读。TPP 再加一层 CXL 内存节点（本地 : CXL 测试比例为 2:1 和 1:4） | 只有 GPU HBM（H100 96GB HBM2e）；多轮对话的 persistent KV 保存在 HBM 中 | 官方明确 [META1][PLMETA1][META5] |
+| 放置单位 | 内存页（论文以 4KB 读时延衡量 zswap） | token 段：长度为 T 的序列切成 2N 段，CP rank i 持有 `C_i` 和 `C_(2N−i−1)`；decode token 每轮偏移一个位置、轮转分配到各 rank | 官方明确 [META1][META5] |
+| 准入 | Senpai 只决定“回收多少”，“回收哪些页”由内核 LRU 决定。匿名页与文件页按 refault 速率平衡：每有一次文件页 refault，就尝试换出一个匿名页。后端由人工按应用的可压缩性选择：可压缩数据用 zswap，难压缩的用 SSD | prefill 与 decode 生成的 KV 全部保留，用于下一轮 | 官方明确 [TMO][META1][META5] |
+| 写入时机 | 主动回收，属于淘汰时下沉：生产版每 6 秒通过 `memory.reclaim` 请求回收一次。zswap 池达到 `max_pool_percent` 或 cgroup 的 `memory.zswap.max` 后，按 LRU 写回 swap 设备，可用 `memory.zswap.writeback=0` 禁止写回。写 SSD 的速率限制在 1 MB/s | KV 生成即写入 HBM，没有下沉 | 官方明确；内核接口见内核文档 [META1][PLMETA3][PLMETA4] |
+| 降级与淘汰 | 由 PSI 触发：`reclaim = current_mem × reclaim_ratio × max(0, 1 − psi_some/psi_threshold)`，生产参数为 `reclaim_ratio=0.0005`、阈值 0.1%，单周期最多回收 1%。开源版 Senpai 则通过调 `memory.high` 实现：默认每 6 秒目标停顿 10 ms，单步收紧上限 1%。TPP 在本地节点空闲内存低于 `demote_scale_factor`（默认 2%）时，把冷页降级到 CXL 节点 | 论文未描述淘汰策略 | 论文 / 源码可见 [META1][PLMETA2][PLMETA1] |
+| 提升与预取 | 按需提升：缺页时从 swap 读回或从 zswap 解压，没有预测式预取。TPP 用 NUMA hint fault 采样 CXL 节点上的页，只有位于 active LRU 的页才提升，以避免页在两层之间来回迁移 | 未命中的部分通过 partial prefill 重算；按缺失率选择算法：低于 5% 用 pass-Q，高于 5% 用 pass-KV | 官方明确 [META1][PLMETA1][META5] |
+| 位置选择 | 单机内、按 cgroup（容器）进行 | KV 分散在 CP 组的各 rank / 主机上；同一用户的后续请求如何路由回同一 CP 组，未公开 | 官方明确；路由未公开 [META1][META5] |
+| 决策者 | Senpai 决定回收量，内核决定回收哪些页，人工决定用哪种后端 | 推理运行时（CP 调度） | 官方明确 [TMO][META5] |
+| 选择依据 | 依据 PSI 停顿时间而不是缺页次数，同时考虑 SSD 写入寿命和可压缩性 | 依据 KV 缺失率和通信量（pass-KV 与 pass-Q 的取舍） | 官方明确 [META1][META5] |
+
+**选择逻辑。**TMO 不预测哪一页会被访问，而是“边施压边观察”：只要应用因缺内存而停顿的时间低于阈值，就继续回收；回收哪些页交给内核 LRU 和 refault 平衡。它的好处是不需要应用先验知识，也能自动适应快慢不同的后端；代价是提升完全按需，慢后端的时延会直接体现为 PSI 上升，进而让 Senpai 收手。TPP 在 CXL 场景下补上了“热页提升”这一半，但提升条件比较保守（必须在 active LRU 上）。
+
+**例子（本文按论文参数推演）。**先看 CP 论文中的长对话：128K 上下文、4 个 CP rank，每个 rank 持有 8 段中的 2 段，即约 32K token 的 KV。用户追问时，若新 token 占 1%（1,280 个），系统选 pass-Q，TTFT 为 899 ms；如果这些 KV 已经丢失、需要全量重算，TTFT 为 11,462 ms 至 12,361 ms [META5]。再看主机侧：如果同一主机上的服务进程有一段 5 分钟未访问的匿名内存，Senpai 每 6 秒按 PSI 回收一点，这些页先被压缩进 zswap；zswap 池满后按 LRU 写回 SSD，写入速率受 1 MB/s 限制。这个流程针对的是普通进程内存，不是 GPU KV。
+
+### 硬件配置信息
+
+| 场景 / 方案 | 计算（GPU / NPU 型号 × 数量，HBM 容量） | CPU 与主机内存（DRAM 容量） | 本地存储（SSD / NVMe / HDD 型号、数量、容量） | 网络（RDMA / NIC 型号与带宽） | 远端 / 共享存储（服务名与规格） | 来源 |
+|---|---|---|---|---|---|---|
+| TMO 生产机群 | — | 数百万台服务器，具体规格未公开 | 每台服务器配一块 NVMe SSD；机群中的主要 SSD 型号 A–G 读写时延在 9.3 ms 至 470 μs 之间，具体型号未公开 | 未公开 | 无 | [META1] |
+| TMO Web A/B 测试 | — | 生产 Skylake 主机，64GB 内存，每组通常数十台 | “快 SSD”与“慢 SSD”两种，型号未公开 | 未公开 | 无 | [META1] |
+| TPP（CXL 分层内存） | — | 预量产 x86 CPU，配基于 FPGA 的 CXL 1.1 内存扩展卡（以无 CPU 的 NUMA 节点出现）；本地 : CXL 容量比 2:1 和 1:4 | 未涉及 swap（实验内存充足） | 未公开 | 无 | [PLMETA1] |
+| CP 推理：Grand Teton Training（GTT） | 每台 8 × H100（NVLink 全互联），每卡 96GB HBM2e、2.4 TB/s；最多 16 台 / 128 卡 | 未公开 | 未公开 | 后端 RDMA 网络，每 GPU 400 Gb/s | 无 | [META5] |
+| CP 推理：Grand Teton Inference（GTI） | 同上，测试用到 1–4 台 | 未公开 | 未公开 | 前端 TCP/IP 网络，每 GPU 100 Gb/s | 无 | [META5] |
+
+在 Meta 公开的 LLM 推理资料中，KV 只落在 H100 HBM（按 CP rank 切分），没有 DRAM、SSD 或远端层。TMO / TPP 的 DRAM、zswap、SSD、CXL 层承载的是通用进程内存，不是 KV。这些来源都没有给出 HDD；Meta 的 HDD 存储体系见大数据部分的 Meta 章节。
+
 ### 与 KV Cache 多级存储（SSD / HDD 下沉）的关系（本文分析）
 
 - **反馈信号可迁移。**TMO 的核心是用“损失的工作时间”而非事件计数驱动卸载，天然适应后端快慢差异。KV 下沉同样面对 DRAM、本地 SSD、远端对象存储、HDD 之间数量级的时延差。可借鉴的对应指标是 GPU 因等待 KV 恢复而空闲的时间或 TTFT 超标比例，而非单纯的缓存命中率。
@@ -108,4 +140,8 @@ TMO 是通用主机内存卸载方案，官方资料中的节省率与性能数�
 - **[META3]** [Linux Kernel Documentation · PSI - Pressure Stall Information（采集于 2026-11-18）](https://docs.kernel.org/accounting/psi.html)
 - **[META4]** [Meta Engineering · Scaling LLM Inference: Innovations in Tensor Parallelism, Context Parallelism, and Expert Parallelism，2025-10-17（官方工程文章）](https://engineering.fb.com/2025/10/17/ai-research/scaling-llm-inference-innovations-tensor-parallelism-context-parallelism-expert-parallelism/)
 - **[META5]** [Yang et al.（Meta Platforms）· Context Parallelism for Scalable Million-Token Inference，MLSys 2025，arXiv:2411.01783 v3（2025-04-21）](https://arxiv.org/abs/2411.01783)
+- **[PLMETA1]** [Maruf, Wang, Dhanotia, Weiner 等（Meta / 密歇根大学）· TPP: Transparent Page Placement for CXL-Enabled Tiered-Memory，ASPLOS ’23（arXiv:2206.02878 v2，2023-05-28）](https://arxiv.org/abs/2206.02878)
+- **[PLMETA2]** [Meta（facebookincubator）· Senpai 源码 senpai.py（提交 c51e8e21，2019-09-03；参数默认值 interval=6、pressure=10000 μs、max-probe=0.01）](https://github.com/facebookincubator/senpai/blob/c51e8e21de5c459406a015c1860d5f6c5ff6a426/senpai.py)
+- **[PLMETA3]** [Linux Kernel Documentation · zswap（LRU 写回、max_pool_percent、shrinker，采集于 2026-11-19）](https://docs.kernel.org/admin-guide/mm/zswap.html)
+- **[PLMETA4]** [Linux Kernel Documentation · Control Group v2（memory.reclaim、memory.zswap.max、memory.zswap.writeback，采集于 2026-11-19）](https://docs.kernel.org/admin-guide/cgroup-v2.html)
 - **[TMO]** [Meta Engineering · Transparent memory offloading: more memory at a fraction of the cost and power，2022-06-20（官方工程文章）](https://engineering.fb.com/2022/06/20/data-infrastructure/transparent-memory-offloading-more-memory-at-a-fraction-of-the-cost-and-power/)

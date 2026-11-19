@@ -6,6 +6,8 @@ Markdown edition of every chapter in the report (two books, four parts), plus th
 
 ## Part 1 · CSP and vendor survey (`vendors/`)
 
+Every vendor chapter includes a 「放置策略：哪些 KV 放到哪一层」 section (which KV goes to which tier, and how that choice is made) and a 「硬件配置信息」 table of the hardware configurations mentioned in its sources.
+
 | # | Chapter | Scope |
 |---|---|---|
 | 01 | [AWS / Amazon Bedrock](vendors/01-aws.md) | Bedrock prompt caching, SageMaker HyperPod tiered KV cache, FSx/S3 offload |
@@ -23,6 +25,7 @@ Markdown edition of every chapter in the report (two books, four parts), plus th
 | 13 | [AMD / MEXT](vendors/13-amd.md) | MEXT Predictive Memory: AI-driven DRAM / NVMe page tiering (official sources) |
 | 14 | [华为 / KVU](vendors/14-huawei.md) | UCM, KVU compute-storage module, OceanStor, CloudMatrix384 EMS |
 | 15 | [Meta](vendors/15-meta.md) | Transparent Memory Offloading (PSI + Senpai); LLM inference parallelism |
+| 16 | [KV Cache 放置策略横向对比](vendors/16-placement-compare.md) | Cross-vendor comparison of KV placement policy (tier chain, admission, write timing, eviction, promotion, routing, decision-maker), design patterns, implications for an HDD tier, and a consolidated hardware-configuration table |
 
 ## Part 2 · AI inference engines (`inference-engines/`)
 
@@ -78,5 +81,5 @@ Markdown edition of every chapter in the report (two books, four parts), plus th
 
 ## Other files
 
-- [sources.md](sources.md) — all 438 cited sources with keys and URLs
+- [sources.md](sources.md) — all 538 cited sources with keys and URLs
 - [figures/](figures/) — figures extracted from the report (official diagrams, document screenshots, PDF page renders, block diagrams drawn from source code)

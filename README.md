@@ -18,7 +18,7 @@ A survey in two books:
 
 ### Book I · AI
 
-- **Part 1 · CSP and vendor survey:** AWS, Microsoft Azure, Google Cloud, Alibaba Cloud, Tencent Cloud, Baidu, CoreWeave; LMCache / Tensormesh, Mooncake (Moonshot AI), NVIDIA Dynamo; Seagate / SK hynix, Western Digital / Solidigm, AMD MEXT, Huawei, Meta TMO
+- **Part 1 · CSP and vendor survey:** AWS, Microsoft Azure, Google Cloud, Alibaba Cloud, Tencent Cloud, Baidu, CoreWeave; LMCache / Tensormesh, Mooncake (Moonshot AI), NVIDIA Dynamo; Seagate / SK hynix, Western Digital / Solidigm, AMD MEXT, Huawei, Meta TMO — each chapter covers KV placement strategy (which KV goes to which tier and how the choice is made) and lists the hardware configurations mentioned in its sources; a closing chapter compares placement across vendors and consolidates the hardware tables
 - **Part 2 · AI inference engines:** SGLang, vLLM and DeepInfer (DeepSeek) — how each implements KV cache management (with block diagrams drawn from pinned source commits) and whether HDD can serve as the bottom tier; enterprise research on long-term KV retention; [engine-to-hardware data paths, bandwidth budgeting and validation](https://dylanding54.github.io/AI-Cloud-Storage-System-Survey/report/part2.html#engine-hardware)
 
 ### Book II · Big data
