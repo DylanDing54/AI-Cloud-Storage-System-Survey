@@ -32,9 +32,15 @@ Markdown edition of every chapter in the report (two books, four parts), plus th
 | 02 | 2.1 SGLang | [SGLang：最底层接入 HDD](inference-engines/02-sglang.md) | Interface feasibility: HiCache L3 file backend on HDD (source review) |
 | 03 | 2.1 SGLang | [HDD 接入路线与改动范围](inference-engines/03-hdd-design.md) | Engineering routes and required changes for an HDD tier |
 | 04 | 2.1 SGLang | [可行性验证与判定标准](inference-engines/04-validation.md) | Validation plan and pass criteria |
-| 05 | 2.2 vLLM | [vLLM：KV 卸载与接入 HDD](inference-engines/05-vllm.md) | vLLM prefix cache, KV connector API, offloading connector fs tier and LMCache disk paths to HDD (with block diagrams) |
-| 06 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：DeepSeek 推理系统的 KV 缓存管理与硬盘缓存](inference-engines/06-deepseek.md) | DeepSeek's inference stack: MLA KV size, 3FS on-SSD context cache, PD disaggregation, HDD relevance (with block diagrams) |
-| 07 | 2.4 Enterprise research | [NVIDIA：完整 KV 是否值得长期保存](inference-engines/07-context-feasibility.md) | Enterprise research: is full long-context KV worth keeping? (NVIDIA) |
+| 05 | 2.2 vLLM | [vLLM：KV 缓存管理策略实现](inference-engines/05-vllm.md) | GPU block management and KV connectors |
+| 06 | 2.2 vLLM | [vLLM：最底层接入 HDD](inference-engines/06-vllm-hdd.md) | Filesystem backend and prototype configuration |
+| 07 | 2.2 vLLM | [vLLM：HDD 接入路线与改动范围](inference-engines/07-vllm-design.md) | Chunk layout, writeback and space reclamation |
+| 08 | 2.2 vLLM | [vLLM：可行性验证与判定标准](inference-engines/08-vllm-validation.md) | Correctness, TTFT and restart tests |
+| 09 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：KV 缓存管理策略实现](inference-engines/09-deepseek.md) | Block allocation, prefix hits and the request lifecycle |
+| 10 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：最底层接入 HDD](inference-engines/10-deepseek-hdd.md) | SSD-backed 3FS and an offline HDD replay |
+| 11 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：HDD 接入路线与改动范围](inference-engines/11-deepseek-design.md) | Cold-tier indexing, promotion and recovery |
+| 12 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：可行性验证与判定标准](inference-engines/12-deepseek-validation.md) | Reuse intervals, read deadlines and fault injection |
+| 13 | 2.4 Enterprise research | [NVIDIA：完整 KV 是否值得长期保存](inference-engines/13-context-feasibility.md) | Value of retaining full long-context KV |
 
 # Book II · Big data
 

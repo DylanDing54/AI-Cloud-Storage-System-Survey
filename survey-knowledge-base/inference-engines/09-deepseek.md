@@ -1,8 +1,8 @@
-# DeepInfer：DeepSeek 推理系统的 KV 缓存管理与硬盘缓存
+# DeepInfer：KV 缓存管理策略实现
 
 > 推理系统 · DeepSeek 官方文档、开源仓库与技术报告
 
-用户所说的“DeepInfer”确有其名：DeepSeek 官方 GitHub 组织 deepseek-ai 下有仓库 `deepseek-ai/DeepInfer`（2026-10-16 创建，Apache-2.0），README 称它是“驱动 DeepSeek 大规模线上服务的高性能推理框架”，目前只支持 DeepSeek-V4.1-Flash，硬件为 NVIDIA SM100 GPU 与华为昇腾 950 NPU [DS1]。但这次开源只包括离线推理所需的引擎核心。README 明确列出“完整推理服务所需、本次未包含”的三项：**KV 缓存系统**、VE / Prefill / Decode 分离（引擎侧功能大部分已实现）、跨数据并行副本的负载均衡 [DS1]。仓库附带的部署 Q&A 也说明，KV 缓存管理与负载均衡组件与内部基础设施耦合较紧，代码尚未完整开源，相关设计见一篇知乎博文与这份 Q&A [DS2]。因此本章分两部分：引擎内部的 KV 管理依据固定提交 `a679bb86`（2026-11-03）的源码；KV 存储系统依据官方 Q&A、DeepSeek API 文档、open-infra-index 与 3FS 仓库的描述，采集于 2026-11-18。结论先行：DeepSeek API 所说的“硬盘缓存”，在官方材料中落在**基于 SSD 的 3FS 专用存储集群**上，没有任何官方材料提到 HDD。
+DeepSeek 官方 GitHub 组织 deepseek-ai 下有仓库 `deepseek-ai/DeepInfer`（2026-10-16 创建，Apache-2.0），README 称它是“驱动 DeepSeek 大规模线上服务的高性能推理框架”，目前只支持 DeepSeek-V4.1-Flash，硬件为 NVIDIA SM100 GPU 与华为昇腾 950 NPU [DS1]。但这次开源只包括离线推理所需的引擎核心。README 明确列出“完整推理服务所需、本次未包含”的三项：**KV 缓存系统**、VE / Prefill / Decode 分离（引擎侧功能大部分已实现）、跨数据并行副本的负载均衡 [DS1]。仓库附带的部署 Q&A 也说明，KV 缓存管理与负载均衡组件与内部基础设施耦合较紧，代码尚未完整开源，相关设计见一篇知乎博文与这份 Q&A [DS2]。因此本章分两部分：引擎内部的 KV 管理依据固定提交 `a679bb86`（2026-11-03）的源码；KV 存储系统依据官方 Q&A、DeepSeek API 文档、open-infra-index 与 3FS 仓库的描述，采集于 2026-11-18。结论先行：DeepSeek API 所说的“硬盘缓存”，在官方材料中落在**基于 SSD 的 3FS 专用存储集群**上，没有任何官方材料提到 HDD。
 
 ### 定位与演进：从“不开源引擎”到 DeepInfer
 
@@ -48,18 +48,6 @@ Q&A 用一张表说明 KV 放在哪里：
 
 开源引擎内部的 KV 管理相当简单。`csrc/engine/block_manager.hpp` 的 `Blocks` 用数组内嵌的 `prev` / `next` 维护空闲链表，块按 `ref_count` 管理：`allocate()` 从链表头取块，`free()` 在引用计数归零后放回链表尾；`BlockManager.free_blocks_nolock()` 逆序释放，`pin_block()` 供 fork 出的序列共享父序列的块。每个序列另从 state 管理器分得一个 state 槽位存放 SWA 等状态 [DS3]。与 vLLM、SGLang 不同，这里**没有 GPU 内的前缀哈希表**，块释放后也不保留可命中的内容。前缀复用全部交给外部的 kvcache-store 与 3FS，引擎只需知道某个序列已有多少 token 算好（`num_cached_tokens`），然后把命中部分装入分配好的块 [DS3][DS2]。
 
-### 持久层：3FS 的实现与容量策略
-
-3FS（Fire-Flyer File System）在 2025 年 Open Source Week Day 5 开源，定位是“充分利用现代 SSD 与 RDMA 网络带宽的并行文件系统”，官方列出的用途包括 V3 / R1 推理中的 KVCache 查找，单客户端节点 KVCache 查找峰值吞吐 40+ GiB/s [DS13]。3FS README 把 KVCache 列为一类场景，称其为“比 DRAM 缓存更具成本效益的替代方案，吞吐高、容量大得多”，并给出两张运行图：所有 KVCache 客户端（每节点 1 × 400 Gbps 网卡）的读吞吐峰值可达 40 GiB/s；GC 删除操作的 IOPS 来自同一时间段 [DS11]。
-
-![3FS 官方仓库 README 的 KVCache Read Throughput 图：30 分钟内所有 KVCache 客户端（每节点 1×400Gbps 网卡）的峰值与平均读吞吐，峰值约 40 GiB/s，平均值远低于峰值](../figures/deepseek-5.png)
-
-*3FS 官方仓库 README 的 KVCache Read Throughput 图：30 分钟内所有 KVCache 客户端（每节点 1×400Gbps 网卡）的峰值与平均读吞吐，峰值约 40 GiB/s，平均值远低于峰值* — [原始来源](https://github.com/deepseek-ai/3FS/blob/main/docs/images/kvcache_read_throughput.png)
-
-3FS 设计文档描述了四个组件（cluster manager、metadata service、storage service、client），全部通过 RDMA（InfiniBand 或 RoCE）互联。每个 storage service 管理几块本地 SSD，以 CRAQ（Chain Replication with Apportioned Queries）保证强一致，“写全部、读任意”，以便吃满 SSD 与 RDMA 带宽。文件按等长 chunk 切分；chunk engine 在每块 SSD 上用固定数量的数据文件加一个 RocksDB 保存元数据，物理块从 64 KiB 到 64 MiB 按 2 的幂分 11 档，空间不够时用 `fallocate()` 一次预留 256 个物理块以减少碎片 [DS12]。FUSE 在小随机读上表现不佳，因此另有异步零拷贝 API（USRBIO） [DS12]。
-
-V4.1 Q&A 给出了 KV 场景的具体配置：数据在 3FS 上以 **10+2 纠删码**存放，每个 EC 组可容忍两个节点同时故障；读请求同时发往组内 11 个节点，任意 10 个返回即可解码；Q&A 称 3FS 必须在节点故障和网络抖动下同时保证高可用与高性能。每个存储节点部署一个 GC Worker，定期按 LRU 淘汰最久未用的 KV，把磁盘占用控制在水位以下。kvcache-store 本身没有过期逻辑，回收完全依赖 3FS 的 GC [DS2]。容量方面，3FS 为 KV 提供约 **100 PiB SSD**，TTL 为 agent 流量 3 天、chatbot 流量 7 天。推荐每台存储服务器配 20 块 30.73 TB SSD，读不低于 40 GB/s、写不低于 5 GB/s，总容量足以保存 24 小时数据；实际配比约为每张在线 GPU 14.4 TB（逻辑容量），物理容量还要更大 [DS2]。按前文每 token 890 B 估算，14.4 TB 约可存 160 亿 token 的 block KV（本文估算）。注意，3FS 公开设计文档描述的冗余方式是 CRAQ 链式复制，10+2 EC 只出现在 V4.1 Q&A 中。
-
 ### 命中判定、计费与线上命中率
 
 对 API 用户而言，规则经历过一次变化。2024-08-02 硬盘缓存上线时，公告写明：只有从第 0 个 token 起相同的前缀才算重复；缓存以 **64 token** 为一个存储单元，不足 64 token 的内容不缓存；缓存“尽力而为”，不保证 100% 命中；不再使用的缓存一般在几小时到几天内自动清空；每个用户的缓存逻辑上相互隔离。当时命中价格为 0.1 元 / 百万 tokens，未命中为 1 元；128K 输入且大部分重复的请求，实测首 token 延迟从 13 秒降到 500 毫秒 [DS7]。现行的“上下文硬盘缓存”指南不再提 64 token，而是说“受 Sliding Window Attention 机制的影响”，每条缓存前缀是一个独立的完整单元，后续请求必须**完整匹配**某个“缓存前缀单元”才能命中。落盘时机有三种：请求结束位置（用户输入末尾、模型输出末尾各产生一个单元）、系统检测到的公共前缀，以及长输入 / 长输出中按固定 token 间隔截取。缓存构建耗时为秒级，命中情况通过 `usage` 中的 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` 返回 [DS6]。现行价格页上，`deepseek-flash`（DeepSeek-V4.1-Flash-1017）高峰时段输入命中 0.04 元、未命中 2 元 / 百万 tokens，命中价为未命中价的 2%；`deepseek-v4-pro` 为 0.30 元对 9.0 元。空闲时段价格减半，缓存存储本身不另收费 [DS8][DS7]。
@@ -71,24 +59,6 @@ V4.1 Q&A 给出了 KV 场景的具体配置：数据在 3FS 上以 **10+2 纠删
 *DeepSeek 硬盘缓存的命中判定：上半部分为 API 文档的规则（2024-08 的 64 token 存储单元 → 现行“缓存前缀单元”的三种落盘时机），下半部分为 DeepInfer Q&A 描述的两段式查询（block KV 得 L1，SWA 决定 L1 或 L1−128）与 bounded replay（本文根据 DeepSeek 官方资料绘制：API 指南、2024-08-02 公告、DeepInfer 部署 Q&A）* — [原始来源](https://api-docs.deepseek.com/zh-cn/guides/kv_cache)
 
 线上效果方面，Day 6 给出了 V3 / R1 的 24 小时统计（北京时间 2025-02-27 12:00 至 02-28 12:00，含网页、App 与 API 全部请求）：输入 6,080 亿 token，其中 3,420 亿（**56.3%**）命中磁盘 KV 缓存；峰值占用 278 个节点，平均 226.75 个（每节点 8 张 H800）；Prefill 阶段每节点平均输入吞吐约 73.7k tokens/s（含缓存命中） [DS9]。V4.1 的 Q&A 没有给出总命中率，只说明当前 3FS 实现已“非常接近可达到的最大命中率”：agent 流量 72 小时、chatbot 流量 7 天的 TTL 几乎覆盖了所有可复用条目，72 小时还能跨过周末，让下一个工作日的请求复用缓存。chatbot 流量的长尾更重，少量 KV 被反复读取很多次；经验上 TTL 缩到约 3 天会让 chatbot 损失 0.5%–1% 的命中率 [DS2]。Q&A 还提到单集群目前每天服务 155 万亿 token [DS2]。
-
-### 与 HDD 的关系：“硬盘缓存”并不在机械盘上
-
-**官方说的介质是什么。**2024 年公告的中文措辞是把内容“缓存在分布式的硬盘阵列中” [DS7]，这里的“硬盘”是相对显存 / 内存而言的磁盘层。此后的官方材料都把介质写成 SSD：3FS 的定位是“利用现代 SSD 与 RDMA 网络” [DS13][DS12]，V4.1 Q&A 写明“约 100 PiB SSD”和每台 20 块 30.73 TB SSD [DS2]。在本次检索的 DeepSeek 官方材料中没有找到 HDD 的部署描述。
-
-**为什么小 KV 让磁盘缓存划算。**每 token 890 B 意味着一台读带宽 40 GB/s 的存储服务器每秒可供出约 4,500 万 token 的 KV（本文估算），命中读取能与请求排队、引擎计算重叠。Q&A 在回答“是否值得做基于 CXL 的集中式 L2 缓存”时也说：V4.1 的 KV 很小，读取已与排队和计算重叠，降低命中读延迟对 TTFT 帮助有限，而且 SSD 比 DRAM 便宜得多。他们真正在意的是 SSD 写入量，即能否把热点或只用一次的条目留在内存里以减少 SSD 磨损，但目前没有这样做 [DS2]。
-
-**加一层 HDD 会带来什么、打破什么。**可能的收益有两点：一是更便宜的容量，可用来把 TTL 延长到 7 天以上，或承接 SSD 层淘汰的冷条目；二是机械盘没有闪存那样的擦写寿命约束，可以分担 write-back 写流。但这两点在官方数据中都很有限。官方称现有 TTL 已接近最大可达命中率，且 TTL 从 7 天缩到 3 天只损失 0.5%–1%，把保留期继续拉长的边际收益更小 [DS2]。代价则落在读路径上。推荐配置相当于每块 SSD 承担约 2 GB/s 读带宽（40 GB/s ÷ 20 块，本文估算）；单块机械盘即使顺序读也只有数百 MB/s 量级，而 KV 读取是细粒度的。一个 128-token 块约 111 KiB，若按 10+2 纠删切到 10 个数据节点，每个节点每次只读 10 KiB 量级（本文估算，假设一个块单独构成一个条带；kvcache-store 的实际文件与条带布局未公开），HDD 的寻道与旋转延迟会占主导。“任意 10 个返回即可解码”的尾延迟设计也是以 SSD 的低延迟为前提的。写侧可参照 WD / Solidigm 报告：其 HDD 阵列上一次持久化的 1 MiB 写入约需 13 ms；在没有 DRAM 前置层时，写入跟不上会直接拉低命中率 [VL18]。
-
-| 判断层次 | 结论 | 依据与缺口 |
-|---|---|---|
-| 接口可行 | 部分可行 | 3FS 已开源，但设计文档按“每个存储服务管理若干本地 SSD”来描述，没有提到机械盘，在 HDD 上运行属于官方未覆盖的用法；kvcache-store、取数进程等 KV 缓存系统没有开源，DeepInfer 开源版本身不含 KV 缓存系统，没有可直接挂接 HDD 层的接口 [DS1][DS2][DS12] |
-| 性能可行 | 作主持久层不可行；作 SSD 之后的冷层待验证 | 推荐配置为每台 ≥ 40 GB/s 读、每块 SSD 约 2 GB/s（本文估算），读取粒度在 10–100 KiB 量级；HDD 只适合在 SSD 之后承接冷条目，需要验证从 HDD 回填的时延能否被请求排队时间吸收 |
-| 生产可行 | 无官方证据 | 官方没有 HDD 部署或测试数据；TTL 已接近最大可达命中率，扩容的边际收益小；官方提到的优化方向是用内存减少 SSD 写入（CXL L2），而不是向下增加机械盘层 [DS2] |
-
-### 资料边界
-
-KV 缓存系统（kvcache-store、取数进程、GC Worker）的源码没有开源，本章对它的描述全部来自 DeepInfer 仓库中的部署 Q&A（截至 2026-11-03 的 v0.2）。Q&A 引用的知乎博文以及 Day 6 的中文版都在知乎上，本次抓取返回 403，没有读到原文。V4.1 每 token 890 B 是依据 HF 配置与 `cache_engine.py` 分配逻辑推算的，没有考虑引擎实际配置下的对齐、Engram 与草稿层，也没有经过运行验证。API 指南中“固定 token 间隔”的具体数值、公共前缀检测算法、10+2 EC 是否已并入 3FS 开源主线，在官方材料中都没有找到。
 
 ## 本章资料
 
@@ -102,10 +72,6 @@ KV 缓存系统（kvcache-store、取数进程、GC Worker）的源码没有开�
 - **[DS8]** [DeepSeek API 文档 · 模型 & 价格（deepseek-flash / deepseek-v4-pro 缓存命中与未命中价格，采集于 2026-11-18）](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)
 - **[DS9]** [DeepSeek 官方 GitHub · open-infra-index《Day 6 - One More Thing: DeepSeek-V3/R1 Inference System Overview》，2025-02 Open Source Week](https://github.com/deepseek-ai/open-infra-index/blob/main/202502OpenSourceWeek/day_6_one_more_thing_deepseekV3R1_inference_system_overview.md)
 - **[DS10]** [DeepSeek 官方 GitHub · open-infra-index《The Path to Open-Sourcing the DeepSeek Inference Engine》，2025-04](https://github.com/deepseek-ai/open-infra-index/blob/main/OpenSourcing_DeepSeek_Inference_Engine/README.md)
-- **[DS11]** [DeepSeek 官方 GitHub · deepseek-ai/3FS README（Performance · KVCache 读吞吐与 GC IOPS 图，采集于 2026-11-18）](https://github.com/deepseek-ai/3FS)
-- **[DS12]** [DeepSeek 官方 GitHub · 3FS docs/design_notes.md（组件、CRAQ、chunk engine、USRBIO，采集于 2026-11-18）](https://github.com/deepseek-ai/3FS/blob/main/docs/design_notes.md)
-- **[DS13]** [DeepSeek 官方 GitHub · open-infra-index README（2025-02 Open Source Week Day 5：3FS 与 smallpond）](https://github.com/deepseek-ai/open-infra-index)
 - **[DS14]** [DeepSeek-AI · DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model（arXiv:2405.04434，2024-05）](https://arxiv.org/abs/2405.04434)
 - **[DS15]** [DeepSeek-AI · DeepSeek-V3 Technical Report（arXiv:2412.19437，2024-12；§3.4 推理与部署）](https://arxiv.org/abs/2412.19437)
 - **[DS16]** [DeepSeek 官方 Hugging Face · deepseek-ai/DeepSeek-V3 config.json（kv_lora_rank、qk_rope_head_dim、num_hidden_layers 等，采集于 2026-11-18）](https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json)
-- **[VL18]** [WD × Solidigm · KV Cache Offload Across Storage Tiers，September 2026 / Revision 02](https://documents.westerndigital.com/content/dam/doc-library/en_us/assets/public/western-digital/collateral/tech-brief/technical-brief-kv-cache-offload-across-storage-tiers-wd.pdf)

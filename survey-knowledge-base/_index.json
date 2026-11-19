@@ -118,21 +118,57 @@
   ],
   [
    "05",
-   "vLLM：KV 卸载与接入 HDD",
+   "vLLM：KV 缓存管理策略实现",
    "推理引擎 · vLLM 官方文档与固定提交源码核查",
    "05-vllm.md"
   ],
   [
    "06",
-   "DeepInfer：DeepSeek 推理系统的 KV 缓存管理与硬盘缓存",
-   "推理系统 · DeepSeek 官方文档、开源仓库与技术报告",
-   "06-deepseek.md"
+   "vLLM：最底层接入 HDD",
+   "推理引擎 · HDD 可行性分析",
+   "06-vllm-hdd.md"
   ],
   [
    "07",
+   "vLLM：HDD 接入路线与改动范围",
+   "推理引擎 · HDD 可行性分析",
+   "07-vllm-design.md"
+  ],
+  [
+   "08",
+   "vLLM：可行性验证与判定标准",
+   "推理引擎 · HDD 可行性分析",
+   "08-vllm-validation.md"
+  ],
+  [
+   "09",
+   "DeepInfer：KV 缓存管理策略实现",
+   "推理系统 · DeepSeek 官方文档、开源仓库与技术报告",
+   "09-deepseek.md"
+  ],
+  [
+   "10",
+   "DeepInfer：最底层接入 HDD",
+   "推理引擎 · HDD 可行性分析",
+   "10-deepseek-hdd.md"
+  ],
+  [
+   "11",
+   "DeepInfer：HDD 接入路线与改动范围",
+   "推理引擎 · HDD 可行性分析",
+   "11-deepseek-design.md"
+  ],
+  [
+   "12",
+   "DeepInfer：可行性验证与判定标准",
+   "推理引擎 · HDD 可行性分析",
+   "12-deepseek-validation.md"
+  ],
+  [
+   "13",
    "NVIDIA：完整 KV 是否值得长期保存",
    "需求可行性 · 企业上下文研究",
-   "07-context-feasibility.md"
+   "13-context-feasibility.md"
   ]
  ],
  "bigdata-io": [
