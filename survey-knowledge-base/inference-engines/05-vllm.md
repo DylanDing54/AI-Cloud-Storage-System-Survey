@@ -1,6 +1,32 @@
-# vLLM：KV 缓存管理策略实现
+# vLLM：整体架构与 KV 缓存管理
 
 > 推理引擎 · vLLM 官方文档与固定提交源码核查
+
+### 整体架构：谁接收请求，谁调度，谁执行
+
+以 `vllm serve` 部署的 V1 在线文本服务为例，一条请求跨过三个边界：API Server 把 HTTP 输入转换成引擎请求，Engine Core 决定本轮为哪些序列计算多少 token，GPU Worker 按计划执行模型。返回方向上，引擎把各请求的新 token 交回前端，由前端解码并向客户端流式输出。下图是单副本、四卡张量并行的实例，四张卡共同执行同一模型副本。 [VL19][VL20]
+
+![vLLM 官方 V1 进程图（TP=4、DP=1）。一个 API Server 对接一个 Engine Core；同一轮调度驱动四个 GPU Worker。](../figures/vllm-v1-process-architecture.jpg)
+
+*vLLM 官方 V1 进程图（TP=4、DP=1）。一个 API Server 对接一个 Engine Core；同一轮调度驱动四个 GPU Worker。* — [原始来源](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/design/arch_overview.md)
+
+| 组件 | 接收什么，决定什么 | 与下游的接口 |
+|---|---|---|
+| API Server / AsyncLLM | 接收提示词与采样参数，处理分词、多模态输入及请求标识，维护客户端输出流。 | 通过 ZMQ 把请求交给 Engine Core；根据请求标识将增量结果返回相应连接。 |
+| Engine Core / Scheduler | 每个数据并行副本有一个核心，持有等待与运行队列。依据 token 预算、已计算长度和可用 KV 块组批。 | 把各请求本步的 token 数、块分配等调度结果交给模型执行器；根据执行结果更新进度。 |
+| Executor / GPU Worker | 执行器组织同一副本的多个 Worker。Worker 持有相应模型权重和设备上的 KV 张量，执行前向计算与采样流程。 | 返回模型执行结果。张量并行时多个 rank 协作完成一次前向，各自保存相应的权重与 KV 分片。 |
+| DP Coordinator（多副本部署） | 在多个数据并行 rank 之间协调负载，以及 MoE 模型所需的同步前向。 | 每个副本仍独立组批。增加 DP 副本扩大可接收的并发，增加 TP 则改变单个副本的执行拓扑。 |
+
+例如 TP=2、DP=4、PP=1 时，八张 GPU 组成四个双卡副本，对应四个 Engine Core。复用某个副本的本地前缀要求请求到达持有该前缀的副本；如需跨副本或跨存储层取回 KV，还需要相应的传输组件。 [VL19][VL4]
+
+### 请求生命周期：长提示词如何与正在生成的请求同批运行
+
+1. **入队。**前端把编码后的请求送入引擎。调度器观察请求尚需计算的 token 数；前缀命中可缩短待处理区间。
+2. **组批。**假设请求 A 有较长提示词，而请求 B 正在生成下一个 token。V1 在同一轮的 token 预算内为运行和等待请求分配工作。启用分块 prefill 后，A 的未命中后缀可分多轮处理，B 也可在其间继续生成。若 KV 槽位不足，调度策略可抢占请求、释放块，稍后重新入队。
+3. **执行与反馈。**`EngineCore.step()` 先调用 `scheduler.schedule()`，再由执行器运行本轮模型计算，按需采样；`scheduler.update_from_output()` 归并结果。异步执行可以重叠相邻轮次的调度与计算。
+4. **返回或继续。**新生成的 token 经前端输出。尚未结束的请求进入后续轮次，结束后释放对块的占用；已索引的完整前缀块仍可能被后续请求复用，直到被回收。
+
+对存储的影响集中在组批之前：本地命中可以直接跳过相应的 prefill；远端命中还要等数据抵达可供 Worker 使用的槽位。评价慢层收益时，应比较取回 KV 新增的等待与省下的 prefill 时间。 [VL19][VL20][VL8][VL2]
 
 vLLM 的 KV 管理可以拆成两层来看。第一层在 GPU 内部：调度器通过 `KVCacheManager` 和 `BlockPool` 管理分页 KV 块，用块哈希做自动前缀缓存（APC），空闲块按 LRU 回收。第二层在 GPU 之外：所有跨进程、跨层级的 KV 搬运都要经过 KV Connector API（`KVConnectorBase_V1`），CPU 卸载、LMCache、NIXL 的 P/D 传输和文件系统下沉都挂在这个接口上。本章依据 vLLM GitHub main 分支固定提交 `0c80c3a6aa0201d1b4f71915f90c03fd64837cec`（提交时间 2026-11-18 08:26 UTC）阅读源码，并对照 docs.vllm.ai、vLLM 官方博客和 LMCache 官方文档，采集于 2026-11-18 [VL1][VL2][VL3]。
 
@@ -50,3 +76,5 @@ vLLM V1 的 APC 采用哈希方案：每个 KV 块的键由**父块哈希、本�
 - **[VL8]** [vLLM 固定提交源码 · vllm/v1/core/sched/scheduler.py（get_num_new_matched_tokens 调用、WAITING_FOR_REMOTE_KVS、_update_from_kv_xfer_finished、_handle_invalid_blocks）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/core/sched/scheduler.py)
 - **[VL14]** [vLLM 固定提交源码 · vllm/config/cache.py（DEFAULT_BLOCK_SIZE、prefix_match_unit、kv_offloading_size / kv_offloading_backend）、config/vllm.py（_post_init_kv_transfer_config）、config/kv_transfer.py（kv_load_failure_policy）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/config/cache.py)
 - **[VL17]** [vLLM 官方文档 · NixlConnector Usage Guide（NIXL 传输后端选择，采集于 2026-11-18）](https://docs.vllm.ai/en/latest/features/nixl_connector_usage/)
+- **[VL19]** [vLLM V1 · Architecture Overview：在线服务进程、并行拓扑与调度预算（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/design/arch_overview.md)
+- **[VL20]** [vLLM V1 · EngineCore.step 与 step_with_batch_queue（固定提交）](https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/engine/core.py)

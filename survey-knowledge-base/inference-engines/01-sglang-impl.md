@@ -1,6 +1,10 @@
-# SGLang：KV 缓存管理策略实现
+# SGLang：整体架构与 KV 缓存管理
 
 > 推理引擎 · SGLang 固定提交源码与官方文档
+
+### 整体架构：请求如何进入调度器并返回文本
+
+以文本生成请求为例，服务入口将输入交给 `TokenizerManager`，后者把文本编码为 token ID，并将请求送给 `Scheduler`。调度器持有活动请求，在组织下一批计算时匹配已缓存的前缀、为剩余 token 分配位置，再交给模型执行。生成的 token ID 经 `DetokenizerManager` 还原为文本，由前端返回给客户端。因而，前缀树和内存池影响的是调度器为一次前向计算准备哪些 token 与 KV 槽位。 [SGI30][SGI16]
 
 本节讲 SGLang 自己怎样管理 KV Cache：一条请求的前缀怎样被认出来，KV 放在显存的什么位置，什么时候释放、淘汰，开启 HiCache 后又怎样在 GPU、主机内存和外部存储三级之间流动。本节与 HDD 两节使用同一个固定提交 `c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab`（2026-11-16），类名、函数名和默认值都按该提交的源码与仓库内文档核对，并补充了 LMSYS 官方博客的设计说明 [SGI16][SGI20][SGI21]。至于把 HDD 挂成 L3 是否可行、要改哪些地方，见后面两节“SGLang：最底层接入 HDD”和“HDD 接入路线与改动范围”，本节不再重复。
 
@@ -136,3 +140,4 @@ SGLang 用两级间接寻址实现前缀共享。第一级是 `ReqToTokenPool.re
 - **[SGI19]** [SGLang 官方仓库 · 固定提交 c712459e7f82（2026-11-16）· unified_cache/tree_core_registry.py（TreeCore 后端选择，默认 rust）](https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/mem_cache/unified_cache/tree_core_registry.py)
 - **[SGI20]** [LMSYS 官方博客 · Fast and Expressive LLM Inference with RadixAttention and SGLang，2024-01-17（采集于 2026-11-18）](https://lmsys.org/blog/2024-01-17-sglang/)
 - **[SGI21]** [LMSYS 官方博客 · SGLang HiCache: Fast Hierarchical KV Caching with Your Favorite Storage Backends，2025-09-10（采集于 2026-11-18）](https://lmsys.org/blog/2025-09-10-sglang-hicache/)
+- **[SGI30]** [SGLang · 请求处理组件：TokenizerManager、Scheduler、DetokenizerManager（固定提交）](https://github.com/sgl-project/sglang/tree/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers)

@@ -28,15 +28,15 @@ Markdown edition of every chapter in the report (two books, four parts), plus th
 
 | # | Section | Chapter | Scope |
 |---|---|---|---|
-| 01 | 2.1 SGLang | [SGLang：KV 缓存管理策略实现](inference-engines/01-sglang-impl.md) | SGLang KV management implementation: RadixCache, memory pools, request lifecycle, HiCache tiers (with block diagrams) |
+| 01 | 2.1 SGLang | [SGLang：整体架构与 KV 缓存管理](inference-engines/01-sglang-impl.md) | SGLang KV management implementation: RadixCache, memory pools, request lifecycle, HiCache tiers (with block diagrams) |
 | 02 | 2.1 SGLang | [SGLang：最底层接入 HDD](inference-engines/02-sglang.md) | Interface feasibility: HiCache L3 file backend on HDD (source review) |
 | 03 | 2.1 SGLang | [HDD 接入路线与改动范围](inference-engines/03-hdd-design.md) | Engineering routes and required changes for an HDD tier |
 | 04 | 2.1 SGLang | [可行性验证与判定标准](inference-engines/04-validation.md) | Validation plan and pass criteria |
-| 05 | 2.2 vLLM | [vLLM：KV 缓存管理策略实现](inference-engines/05-vllm.md) | GPU block management and KV connectors |
+| 05 | 2.2 vLLM | [vLLM：整体架构与 KV 缓存管理](inference-engines/05-vllm.md) | V1 process architecture, request scheduling, GPU execution, prefix cache and KV connectors |
 | 06 | 2.2 vLLM | [vLLM：最底层接入 HDD](inference-engines/06-vllm-hdd.md) | Filesystem backend and prototype configuration |
 | 07 | 2.2 vLLM | [vLLM：HDD 接入路线与改动范围](inference-engines/07-vllm-design.md) | Chunk layout, writeback and space reclamation |
 | 08 | 2.2 vLLM | [vLLM：可行性验证与判定标准](inference-engines/08-vllm-validation.md) | Correctness, TTFT and restart tests |
-| 09 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：KV 缓存管理策略实现](inference-engines/09-deepseek.md) | Block allocation, prefix hits and the request lifecycle |
+| 09 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：整体架构与 KV 缓存管理](inference-engines/09-deepseek.md) | Online service topology, stage-level routing, offline engine loop and KV reuse |
 | 10 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：最底层接入 HDD](inference-engines/10-deepseek-hdd.md) | SSD-backed 3FS and an offline HDD replay |
 | 11 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：HDD 接入路线与改动范围](inference-engines/11-deepseek-design.md) | Cold-tier indexing, promotion and recovery |
 | 12 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：可行性验证与判定标准](inference-engines/12-deepseek-validation.md) | Reuse intervals, read deadlines and fault injection |

@@ -1,6 +1,32 @@
-# DeepInfer：KV 缓存管理策略实现
+# DeepInfer：整体架构与 KV 缓存管理
 
 > 推理系统 · DeepSeek 官方文档、开源仓库与技术报告
+
+### 整体架构：入口、分阶段计算与共享存储
+
+DeepSeek V4.1 Flash 的线上服务把视觉编码、提示词处理（Prefill）和逐 token 生成（Decode）部署在可独立扩缩的计算资源上。DeepSeek Recipe 在 API 协议与模型 token 之间转换；Entrypoint 协调请求进入相应阶段。引擎实例执行分配到本阶段的批次；独立的 KV 存储集群向不同 Prefill 实例提供已计算的前缀。下图来自官方部署资料，开源 DeepInfer 仓库提供了其中可独立运行的离线推理核心。 [DS1][DS2]
+
+![DeepInfer 仓库 doc/images/architecture_overview.png：DeepSeek V4.1 Flash 推理系统参考架构。DeepSeek Recipe 负责协议与 token 互转，Entrypoint 分发到 Vision Encoder / Prefill / Decode 三类负载均衡器；蓝色箭头为 KV 数据流：External KVCache Storage（3FS）向 Prefill Service 供数，Decode Service 写入 3FS](../figures/deepseek-1.png)
+
+*DeepInfer 仓库 doc/images/architecture_overview.png：DeepSeek V4.1 Flash 推理系统参考架构。DeepSeek Recipe 负责协议与 token 互转，Entrypoint 分发到 Vision Encoder / Prefill / Decode 三类负载均衡器；蓝色箭头为 KV 数据流：External KVCache Storage（3FS）向 Prefill Service 供数，Decode Service 写入 3FS* — [原始来源](https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/doc/images/architecture_overview.png)
+
+| 服务或资源 | 接收的工作 | 决策依据与输出 |
+|---|---|---|
+| Recipe / Entrypoint | 协议请求、历史消息及可选图像。 | Recipe 将不同协议映射为统一消息格式并编码；入口在 Prefill 路由前查询前缀命中长度。返回时由 Recipe 解析 token 流中的文本、推理边界和工具调用。 |
+| Vision Encoder | 含图片的请求需要生成视觉 embedding。 | 官方部署按机器选择编码资源，再在机内按正在处理的图像 patch 数选择 GPU。纯文本请求可直接进入语言模型路径。 |
+| Prefill 实例 | 提示词、可复用前缀，以及需要计算的新后缀。 | 普通八卡机承担提示词计算。负载均衡器按上下文长度分桶，各引擎按剩余计算配额取任务；共享存储允许不同机器取得同一前缀。 |
+| Decode 实例 | 接收 P→D 传来的序列状态和 KV，持续生成 token。 | 64–128 卡超节点承载较大规模专家并行。路由同时考虑活跃请求数和总 KV 长度，两者分别影响每步批量和注意力开销。 |
+| kvcache-store / 3FS | 匹配前缀元数据、读取历史 block KV、后台写回。 | 3FS 以 SSD 保存分页 block KV；滑动窗口注意力（SWA）的状态另由主机内存和目录管理。两类数据沿不同路径恢复。 |
+
+这里有两级调度。集群级路由决定请求交给哪台 Prefill 或 Decode 机器；实例内调度决定本步运行哪些序列、每条处理多长。在 Prefill 端，即使两个请求还有同样多的新 token，已存在的上下文长度也会改变计算耗时。官方实现以新 token 数和已有前缀长度估算成本，再按单步时间预算选择分块大小。 [DS2]
+
+### 一次多轮文本请求：从前缀匹配到返回答案
+
+1. **入口先查元数据。**Recipe 生成 token 序列后，Entrypoint 向 CHECK 角色查询哈希链，确定最长可复用前缀。命中长度必须在路由前已知，这一段时间计入请求启动开销。
+2. **Prefill 汇合两条数据流。**命中时，取数进程从 3FS 异步读至主机共享内存，再将数据搬入 HBM；执行端为新后缀计算 KV。无可复用前缀时，从头执行 prefill。取数与排队、计算能重叠多少，决定了命中对首 token 延迟的实际贡献。
+3. **Decode 接手。**Prefill 完成后，P→D 路径传递继续生成所需的 KV 与状态。Decode 逐步推进序列，生成 token 交由前端解析并返回。后台写回用于后续请求复用，读入缓存时由引擎校验数据。
+
+在开源代码里可以继续追到单实例的一步：`LLMEngine.add_request()` 接入请求；`step()` 调用 C++ 调度器，取得序列元数据及本轮计划；引擎按计划处理需克隆或清零的状态与块，再通过 `execute_model_step` 驱动 Worker。执行结果进入后处理，供序列继续生成或结束。线上跨实例的路由、缓存查询与 3FS 取数则依据部署 Q&A 描述；离线引擎单步仅覆盖其中的模型执行部分。 [DS17][DS2][DS1]
 
 DeepSeek 官方 GitHub 组织 deepseek-ai 下有仓库 `deepseek-ai/DeepInfer`（2026-10-16 创建，Apache-2.0），README 称它是“驱动 DeepSeek 大规模线上服务的高性能推理框架”，目前只支持 DeepSeek-V4.1-Flash，硬件为 NVIDIA SM100 GPU 与华为昇腾 950 NPU [DS1]。但这次开源只包括离线推理所需的引擎核心。README 明确列出“完整推理服务所需、本次未包含”的三项：**KV 缓存系统**、VE / Prefill / Decode 分离（引擎侧功能大部分已实现）、跨数据并行副本的负载均衡 [DS1]。仓库附带的部署 Q&A 也说明，KV 缓存管理与负载均衡组件与内部基础设施耦合较紧，代码尚未完整开源，相关设计见一篇知乎博文与这份 Q&A [DS2]。因此本章分两部分：引擎内部的 KV 管理依据固定提交 `a679bb86`（2026-11-03）的源码；KV 存储系统依据官方 Q&A、DeepSeek API 文档、open-infra-index 与 3FS 仓库的描述，采集于 2026-11-18。结论先行：DeepSeek API 所说的“硬盘缓存”，在官方材料中落在**基于 SSD 的 3FS 专用存储集群**上，没有任何官方材料提到 HDD。
 
@@ -8,11 +34,7 @@ DeepSeek 官方 GitHub 组织 deepseek-ai 下有仓库 `deepseek-ai/DeepInfer`�
 
 2025 年 4 月，DeepSeek 在《The Path to Open-Sourcing the DeepSeek Inference Engine》中写道：内部推理引擎基于一年多前 fork 的早期 vLLM，已针对 DeepSeek 模型深度定制，又与集群管理等内部设施紧耦合，因此决定不整体开源，改为把可复用的功能拆成独立库、把优化贡献给现有开源项目 [DS10]。2026 年 10 月发布的 DeepInfer 在这一点上前进了一步：README 致谢称它“最初主要构建在 vLLM 之上”，并借鉴了 SGLang 与 TensorRT-LLM；但与 KV 存储相关的部分仍然没有放出 [DS1][DS2]。
 
-系统形态的变化可以从两张官方架构图对比看出。2025 年 2 月 Open Source Week Day 6 公布的 V3 / R1 推理系统是 P/D 分离加跨节点 EP：Prefill 每个部署单元 4 节点（路由专家 EP32、MLA 与共享专家 DP32），Decode 每个部署单元 18 节点（EP144 / DP144），图中外部 KVCache 存储标注为“Optional” [DS9]。V4.1 Flash 的 Q&A 则把系统描述为“E/P/D 分离加专用存储节点”：Prefill 用普通 8 卡机、EP2–8 / DP2–8；Decode 用 64–128 卡超节点、EP64–128（Wide-EP）；视觉编码器单卡部署；暂不使用 TP 与 CP。设计目标第三条直接写明**KV 缓存保留 72 小时以上** [DS2]。
-
-![DeepInfer 仓库 doc/images/architecture_overview.png：DeepSeek V4.1 Flash 推理系统参考架构。DeepSeek Recipe 负责协议与 token 互转，Entrypoint 分发到 Vision Encoder / Prefill / Decode 三类负载均衡器；蓝色箭头为 KV 数据流：External KVCache Storage（3FS）向 Prefill Service 供数，Decode Service 写入 3FS](../figures/deepseek-1.png)
-
-*DeepInfer 仓库 doc/images/architecture_overview.png：DeepSeek V4.1 Flash 推理系统参考架构。DeepSeek Recipe 负责协议与 token 互转，Entrypoint 分发到 Vision Encoder / Prefill / Decode 三类负载均衡器；蓝色箭头为 KV 数据流：External KVCache Storage（3FS）向 Prefill Service 供数，Decode Service 写入 3FS* — [原始来源](https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/doc/images/architecture_overview.png)
+与开篇的 V4.1 Flash 架构相比，早期 V3 / R1 部署采用了不同的资源配比。2025 年 2 月 Open Source Week Day 6 公布的 V3 / R1 推理系统是 P/D 分离加跨节点 EP：Prefill 每个部署单元 4 节点（路由专家 EP32、MLA 与共享专家 DP32），Decode 每个部署单元 18 节点（EP144 / DP144），图中外部 KVCache 存储标注为“Optional” [DS9]。V4.1 Flash 的 Q&A 则把系统描述为“E/P/D 分离加专用存储节点”：Prefill 用普通 8 卡机、EP2–8 / DP2–8；Decode 用 64–128 卡超节点、EP64–128（Wide-EP）；视觉编码器单卡部署；暂不使用 TP 与 CP。设计目标第三条直接写明**KV 缓存保留 72 小时以上** [DS2]。
 
 ![open-infra-index Day 6《DeepSeek-V3/R1 Inference System Overview》中的在线推理系统图（2025-02）：API Server、Prefill / Decode Load Balancer、各实例内的 Expert-Parallel Load Balancer，以及标注为 Optional 的 External KVCache Storage](../figures/deepseek-2.png)
 
@@ -75,3 +97,4 @@ Q&A 用一张表说明 KV 放在哪里：
 - **[DS14]** [DeepSeek-AI · DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model（arXiv:2405.04434，2024-05）](https://arxiv.org/abs/2405.04434)
 - **[DS15]** [DeepSeek-AI · DeepSeek-V3 Technical Report（arXiv:2412.19437，2024-12；§3.4 推理与部署）](https://arxiv.org/abs/2412.19437)
 - **[DS16]** [DeepSeek 官方 Hugging Face · deepseek-ai/DeepSeek-V3 config.json（kv_lora_rank、qk_rope_head_dim、num_hidden_layers 等，采集于 2026-11-18）](https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json)
+- **[DS17]** [DeepInfer · LLMEngine：请求接入、C++ 调度、Worker 执行与结果处理（固定提交）](https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/deepinfer/engine/llm_engine.py)

@@ -442,3 +442,7 @@ All references cited in the report, keyed as in the report text.
 | VL9 | vLLM 固定提交源码 · vllm/v1/kv_offload/tiering/fs/manager.py 与 io.py（FileSystemTierManager、batch_store_block / batch_load_block、probe_o_direct） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/kv_offload/tiering/fs/manager.py> |
 | W | WD × Solidigm · KV Cache Offload Across Storage Tiers，September 2026 / Revision 02 | <https://documents.westerndigital.com/content/dam/doc-library/en_us/assets/public/western-digital/collateral/tech-brief/technical-brief-kv-cache-offload-across-storage-tiers-wd.pdf> |
 | WP | WD · KV Cache Offload 官方介绍 | <https://www.westerndigital.com/resources/technical-brief/kv-cache-offload-tiered-storage-benchmark> |
+| VL19 | vLLM V1 · Architecture Overview：在线服务进程、并行拓扑与调度预算（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/design/arch_overview.md> |
+| VL20 | vLLM V1 · EngineCore.step 与 step_with_batch_queue（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/engine/core.py> |
+| SGI30 | SGLang · 请求处理组件：TokenizerManager、Scheduler、DetokenizerManager（固定提交） | <https://github.com/sgl-project/sglang/tree/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers> |
+| DS17 | DeepInfer · LLMEngine：请求接入、C++ 调度、Worker 执行与结果处理（固定提交） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/deepinfer/engine/llm_engine.py> |

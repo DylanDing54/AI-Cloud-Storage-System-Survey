@@ -94,7 +94,7 @@
  "inference-engines": [
   [
    "01",
-   "SGLang：KV 缓存管理策略实现",
+   "SGLang：整体架构与 KV 缓存管理",
    "推理引擎 · SGLang 固定提交源码与官方文档",
    "01-sglang-impl.md"
   ],
@@ -118,7 +118,7 @@
   ],
   [
    "05",
-   "vLLM：KV 缓存管理策略实现",
+   "vLLM：整体架构与 KV 缓存管理",
    "推理引擎 · vLLM 官方文档与固定提交源码核查",
    "05-vllm.md"
   ],
@@ -142,7 +142,7 @@
   ],
   [
    "09",
-   "DeepInfer：KV 缓存管理策略实现",
+   "DeepInfer：整体架构与 KV 缓存管理",
    "推理系统 · DeepSeek 官方文档、开源仓库与技术报告",
    "09-deepseek.md"
   ],
