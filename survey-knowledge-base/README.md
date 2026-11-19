@@ -29,18 +29,15 @@ Markdown edition of every chapter in the report (two books, four parts), plus th
 | # | Section | Chapter | Scope |
 |---|---|---|---|
 | 01 | 2.1 SGLang | [SGLang：整体架构与 KV 缓存管理](inference-engines/01-sglang-impl.md) | SGLang KV management implementation: RadixCache, memory pools, request lifecycle, HiCache tiers (with block diagrams) |
-| 02 | 2.1 SGLang | [SGLang：最底层接入 HDD](inference-engines/02-sglang.md) | Interface feasibility: HiCache L3 file backend on HDD (source review) |
-| 03 | 2.1 SGLang | [HDD 接入路线与改动范围](inference-engines/03-hdd-design.md) | Engineering routes and required changes for an HDD tier |
-| 04 | 2.1 SGLang | [可行性验证与判定标准](inference-engines/04-validation.md) | Validation plan and pass criteria |
-| 05 | 2.2 vLLM | [vLLM：整体架构与 KV 缓存管理](inference-engines/05-vllm.md) | V1 process architecture, request scheduling, GPU execution, prefix cache and KV connectors |
-| 06 | 2.2 vLLM | [vLLM：最底层接入 HDD](inference-engines/06-vllm-hdd.md) | Filesystem backend and prototype configuration |
-| 07 | 2.2 vLLM | [vLLM：HDD 接入路线与改动范围](inference-engines/07-vllm-design.md) | Chunk layout, writeback and space reclamation |
-| 08 | 2.2 vLLM | [vLLM：可行性验证与判定标准](inference-engines/08-vllm-validation.md) | Correctness, TTFT and restart tests |
-| 09 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：整体架构与 KV 缓存管理](inference-engines/09-deepseek.md) | Online service topology, stage-level routing, offline engine loop and KV reuse |
-| 10 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：最底层接入 HDD](inference-engines/10-deepseek-hdd.md) | SSD-backed 3FS and an offline HDD replay |
-| 11 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：HDD 接入路线与改动范围](inference-engines/11-deepseek-design.md) | Cold-tier indexing, promotion and recovery |
-| 12 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：可行性验证与判定标准](inference-engines/12-deepseek-validation.md) | Reuse intervals, read deadlines and fault injection |
-| 13 | 2.4 Enterprise research | [NVIDIA：完整 KV 是否值得长期保存](inference-engines/13-context-feasibility.md) | Value of retaining full long-context KV |
+| 02 | 2.1 SGLang | [SGLang：HDD 接入方案与改动范围](inference-engines/02-sglang.md) | HiCache file backend, tiering options and required changes |
+| 03 | 2.1 SGLang | [可行性验证与判定标准](inference-engines/03-validation.md) | Validation plan and pass criteria |
+| 04 | 2.2 vLLM | [vLLM：整体架构与 KV 缓存管理](inference-engines/04-vllm.md) | V1 process architecture, request scheduling, GPU execution, prefix cache and KV connectors |
+| 05 | 2.2 vLLM | [vLLM：HDD 接入方案与改动范围](inference-engines/05-vllm-hdd.md) | Filesystem prototype, chunk layout, writeback and recovery |
+| 06 | 2.2 vLLM | [vLLM：可行性验证与判定标准](inference-engines/06-vllm-validation.md) | Correctness, TTFT and restart tests |
+| 07 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：整体架构与 KV 缓存管理](inference-engines/07-deepseek.md) | Online service topology, stage-level routing, offline engine loop and KV reuse |
+| 08 | 2.3 DeepInfer (DeepSeek) | [DeepInfer（DeepSeek）：HDD 接入方案与改动范围](inference-engines/08-deepseek-hdd.md) | 3FS baseline, proposed HDD cold tier and changes to the read/write paths |
+| 09 | 2.3 DeepInfer (DeepSeek) | [DeepInfer：可行性验证与判定标准](inference-engines/09-deepseek-validation.md) | Reuse intervals, read deadlines and fault injection |
+| 10 | 2.4 Enterprise research | [NVIDIA：完整 KV 是否值得长期保存](inference-engines/10-context-feasibility.md) | Value of retaining full long-context KV |
 
 # Book II · Big data
 

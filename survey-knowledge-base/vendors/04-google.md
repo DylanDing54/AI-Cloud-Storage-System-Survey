@@ -38,7 +38,9 @@ Agent Platform 文档写明，隐式缓存把前缀放在**两个存储层**：�
 
 显式缓存在 Agent Platform 中是区域资源，名称格式为 `projects/PROJECT_NUMBER/locations/LOCATION/cachedContents/CACHE_ID`，内容存储在创建请求所在的区域；可缓存 Gemini 多模态支持的任意 MIME 类型，超过 10 MB 的内容必须以 Cloud Storage URI 指定。 [GCP2][GCP3] 使用缓存时，创建缓存时已指定的 system instruction、tools、tool_config 不能在请求中再次指定。 [GCP3] 下例摘编自官方 Python（Google Gen AI SDK）示例，依次为创建、引用、读取命中计量与延长 TTL： [GCP2][GCP3][GCP4]
 
-```
+~~~python
+# 出处（据此整理） [GCP2] https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/context-cache/context-cache-create
+# 出处（据此整理） [GCP3] https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/context-cache/context-cache-use
 # export GOOGLE_CLOUD_PROJECT=... ; GOOGLE_CLOUD_LOCATION=us-central1
 # export GOOGLE_GENAI_USE_ENTERPRISE=True
 from google import genai
@@ -67,7 +69,8 @@ resp = client.models.generate_content(
 print(resp.usage_metadata.cached_content_token_count)   # REST 字段 cachedContentTokenCount
 
 client.caches.update(name=cache.name, config=UpdateCachedContentConfig(ttl="36000s"))
-```
+
+~~~
 
 无论隐式还是显式，响应元数据中的 `cachedContentTokenCount` 给出输入中被缓存部分的 token 数；Gemini API 的 Interactions API 则使用 `usage.total_cached_tokens`。 [GCP1][GCP7] Gemini API 的显式缓存只允许修改 `ttl` 或 `expire_time`，可以列出缓存元数据但不能取回缓存内容；使用显式缓存的请求不再叠加隐式缓存，随缓存一起发送的其他输入 token 按标准价计费。 [GCP7]
 

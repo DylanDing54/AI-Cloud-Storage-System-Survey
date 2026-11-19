@@ -83,7 +83,8 @@ LMCache 的技术报告（arXiv 2510.09665，v1 提交于 2025-10-08，v2 更新
 
 MP 模式下的最小配置是两条命令：先启动 LMCache server，再让 vLLM 通过 `LMCacheMPConnector` 接入；生产环境应使用默认的 256 token chunk [LMC6]。下例在官方快速上手与 L2 文档的参数上组合了 L1 内存、L1 / L2 两级 LRU 淘汰与 S3 兼容 L2 后端（端点为示意） [LMC6][LMC3][L]：
 
-```
+~~~bash
+# 出处（据此整理） [LMC6] https://docs.lmcache.ai/getting_started/quickstart.html
 lmcache server --host 0.0.0.0 --port 5555 \
   --chunk-size 256 --l1-size-gb 100 \
   --eviction-policy LRU --eviction-trigger-watermark 0.8 --eviction-ratio 0.2 \
@@ -96,7 +97,7 @@ lmcache server --host 0.0.0.0 --port 5555 \
 vllm serve Qwen/Qwen3-8B --kv-transfer-config \
   '{"kv_connector":"LMCacheMPConnector","kv_role":"kv_both",
     "kv_connector_extra_config":{"lmcache.mp.host":"localhost","lmcache.mp.port":5555}}'
-```
+~~~
 
 旧版进程内模式用 YAML 或 `LMCACHE_*` 环境变量配置，例如官方 CI 中的本地盘配置使用 `LMCACHE_CHUNK_SIZE=256`、`LMCACHE_LOCAL_DISK="file:///..."`、`LMCACHE_MAX_LOCAL_DISK_SIZE=10`；S3 后端则以 `remote_url: "s3://bucket"` 加 `extra_config`（区域、CRT I/O 线程数、HTTP/2 等）配置 [LMC10][L]。
 

@@ -32,7 +32,8 @@ Learn 文档对 prompt caching 的定义是：对开头内容相同的较长提�
 
 下面的示例综合了 Learn 文档中的请求字段和用量字段：使用 OpenAI Python SDK 访问 Azure OpenAI v1 端点，`model` 填部署名。`prompt_cache_options` 与 `prompt_cache_breakpoint` 是 Azure 文档列出的字段，这里通过 `extra_body` 透传，避免依赖特定 SDK 版本的类型定义。
 
-```
+~~~python
+# 出处（据此整理） [PB] https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/prompt-caching
 from openai import OpenAI
 
 client = OpenAI(
@@ -59,7 +60,7 @@ resp = client.chat.completions.create(
 d = resp.usage.prompt_tokens_details
 print("cached_tokens     =", d.cached_tokens)                       # 缓存读取
 print("cache_write_tokens=", getattr(d, "cache_write_tokens", None))  # 缓存写入（GPT-5.6+ Standard PAYG）
-```
+~~~
 
 文档给出的 Chat Completions 响应样例中，`prompt_tokens` 为 1,566，`cached_tokens` 为 1,408，`cache_write_tokens` 为 0。对 GPT-5.4 及更早模型，若要启用 extended 保留，在请求中加入 `"prompt_cache_retention": "24h"` 即可。 [PB]
 

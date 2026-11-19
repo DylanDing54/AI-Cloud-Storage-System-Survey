@@ -64,12 +64,13 @@ AMD 的 SIGGRAPH 2026 官方博客用同样的语言描述该技术：识别哪�
 
 安装流程是解压 AMD 提供的安装包、阅读 EULA 和 README 后执行 `sudo ./install.sh`，官方称整个过程不到 5 分钟，且无需修改应用或操作系统。安装后默认提供相当于物理 DRAM 20% 的 MEXT Memory，可在 `free -h` 中直接看到增加的内存。调整容量用 `mext-config` 并重启，例如在 1TB 物理内存的系统上：
 
-```
+~~~bash
+# 出处（据此整理） [AMD4] https://www.amd.com/en/search/documentation/hub.html#sortCriteria=%40amd_release_date%20descending&f-amd_product_brand=AMD%20MEXT%20Software&f-amd_document_type=User%20Guides
 sudo mext-config --set-config mextMemory=40%   # 或 mextMemory=410G
 /opt/mext/bin/mext_status.sh                     # 查看组件状态
 /opt/mext/bin/mext_stress.sh                     # 运行示例负载验证
 sudo systemctl enable mextd && sudo systemctl start mextd
-```
+~~~
 
 配置文件位于 `/etc/opt/mext/mextd.conf`。指南特别提示：运行中不允许停止 mextd，因为这相当于从运行中的系统拔掉一条内存 DIMM；要停用必须先 disable 服务再重启。 [AMD4] 获取方式方面，官方 FAQ 和产品简报均要求通过 AMD 销售代表启动免费的概念验证（PoC），未公开标价。 [AMD1][AMD3]
 

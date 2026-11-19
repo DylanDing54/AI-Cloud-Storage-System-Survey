@@ -73,7 +73,8 @@ FlexKV 只管理 GPU 之下的层级，GPU KV 仍由推理引擎管理，不在�
 
 vLLM ≥ 0.17.2 已内置连接器，无需打 patch；官方示例用 32 GB CPU 内存与 1 TB SSD 作为二、三级缓存 [TX5]：
 
-```
+~~~bash
+# 出处（据此整理） [TX5] https://github.com/taco-project/FlexKV/blob/main/docs/vllm_adapter/README_zh.md
 cat <<EOF > ./flexkv_config.yml
 cpu_cache_gb: 32
 ssd_cache_gb: 1024
@@ -86,15 +87,22 @@ export FLEXKV_CONFIG_PATH="./flexkv_config.yml"
 VLLM_USE_V1=1 python -m vllm.entrypoints.cli.main serve Qwen3/Qwen3-32B \
   --tensor-parallel-size 8 --enable-chunked-prefill --enable-prefix-caching \
   --kv-transfer-config '{"kv_connector":"FlexKVConnectorV1","kv_role":"kv_both"}'
-```
+~~~
 
 vLLM 还有实验性的 layer-wise 加载（`"use_layerwise":true`），让第 N+1 层 KV 的搬运与第 N 层计算重叠，目前只对 GET/H2D 做逐层流水，不支持 Context Parallel 与 GDS，单层等待超过 `FLEXKV_LAYERWISE_WAIT_TIMEOUT_S`（默认 60 秒）则 forward 失败 [TX5]。SGLang v0.5.16 及以上用 `--enable-flexkv --flexkv-config-file`（等价于 `--radix-cache-backend flexkv`）启用 [TX6]；TensorRT-LLM 通过 `TENSORRT_LLM_USE_FLEXKV=1` 与 `kv_connector_config` 中的 `FlexKVSchedulerConnector` / `FlexKVWorkerConnector` 接入，文档基于 v1.1.0rc2 并要求 `enable_partial_reuse: false` [TX7]；Dynamo 以 `DYNAMO_USE_FLEXKV=1` 启用 [TX13]。运行时可设 `FLEXKV_ENABLE_METRICS=1`，以 Prometheus 端点导出命中 / 未命中、内存池状态与传输统计 [F]。
 
 #### TACO-LLM 的前缀缓存与 CPU 卸载
 
-![腾讯云官方文档《计算加速套件 TACO Kit：TACO LLM 推理加速引擎》PDF 第 36 页：Prefix Cache Offload 原理与选项（页面渲染裁切）](../figures/tencent-3.png)
-
-*腾讯云官方文档《计算加速套件 TACO Kit：TACO LLM 推理加速引擎》PDF 第 36 页：Prefix Cache Offload 原理与选项（页面渲染裁切）* — [原始来源](https://main.qcloudimg.com/raw/document/product/pdf/1573_115165_cn.pdf)
+~~~text
+# 出处：腾讯云《TACO LLM 推理加速引擎》第 36 页，命令行帮助节选
+# https://main.qcloudimg.com/raw/document/product/pdf/1573_115165_cn.pdf#page=36
+--enable-prefix-cache-offload
+--cpu-prefill-memory-utilization CPU_PREFILL_MEMORY_UTILIZATION
+--apc-offload-not-lazy
+--apc-offload-min-access-threshold APC_OFFLOAD_MIN_ACCESS_THRESHOLD
+--apc-offload-enable-hit-cnt
+--apc-offload-gpu-evictor-limit APC_OFFLOAD_GPU_EVICTOR_LIMIT
+~~~
 
 TACO-LLM 官方文档“Auto Prefix Caching”一节（更新于 2025-04-17）说明，`--enable-prefix-caching` 开启跨请求前缀 KV 复用；在此基础上 `--enable-prefix-cache-offload` 让显存中被驱逐的 prefix cache 卸载到 CPU 内存，命中时再加载回 GPU [TX14]。相关参数包括：`--cpu-prefill-memory-utilization`（用于 KV 的 CPU 内存比例，默认 0.3，按机器总内存计算并按卡均分）、`--apc-offload-min-access-threshold`（block 被卸载的最小使用次数，默认 1 即全部卸载，调大则只卸载多次使用的 block）、`--apc-offload-enable-hit-cnt`（每 100 个 block 打印一次命中日志）。文档举例：GPU 共 100 个 block、11 个不同前缀各占 10 个 block 时，Q11 结束后 Q1 的前缀已被驱逐，与 Q1 同前缀的 Q12 只能依靠 CPU 卸载层获得加速；示例日志显示 GPU 命中 12.34%、CPU 命中 37.21%、未命中 50.44% [TX14]。这是一条 GPU→CPU 两级、单机引擎内的路径，文档未提及 SSD 层。
 

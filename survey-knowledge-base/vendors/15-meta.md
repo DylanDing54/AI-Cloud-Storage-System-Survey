@@ -24,9 +24,10 @@ TMO 由用户态和内核中的多个组件组成。未经修改的负载运行�
 
 **Senpai 的反馈控制。**Senpai 以 PSI 为反馈：压力低于阈值就加大回收，压力接近阈值则放缓。每次回收量按下式计算，每 6 秒执行一次，以便留出时间观察回收引起的 refault：
 
-```
+~~~python
+# 出处（据此整理） [TMO] https://engineering.fb.com/2022/06/20/data-infrastructure/transparent-memory-offloading-more-memory-at-a-fraction-of-the-cost-and-power/
 reclaim = current_mem * reclaim_ratio * max(0, 1 - psi_some / psi_threshold)
-```
+~~~
 
 论文披露生产中对所有应用使用同一组参数：`reclaim_ratio = 0.0005`、`PSI_threshold = 0.1%`；单个周期最多回收负载大小的 1%，因此对大幅收缩的反应时间是分钟级，而负载扩张时的适应是即时的。Senpai 还同时监控 IO PSI，因为 refault 可能不直接表现为缺页时延，却会拖慢存储设备而间接影响负载；在 SSD 写入寿命阈值被超过或 swap 空间耗尽时，Senpai 也会调节回收。 [META1]
 

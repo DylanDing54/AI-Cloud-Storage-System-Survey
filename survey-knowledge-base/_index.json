@@ -100,75 +100,57 @@
   ],
   [
    "02",
-   "SGLang：最底层接入 HDD",
+   "SGLang：HDD 接入方案与改动范围",
    "接口可行性 · 2026-11-16 固定版本源码核查",
    "02-sglang.md"
   ],
   [
    "03",
-   "HDD 接入路线与改动范围",
-   "工程可行性 · 区分现成接口与待开发优化",
-   "03-hdd-design.md"
+   "可行性验证与判定标准",
+   "研究计划 · 非实测结论",
+   "03-validation.md"
   ],
   [
    "04",
-   "可行性验证与判定标准",
-   "研究计划 · 非实测结论",
-   "04-validation.md"
+   "vLLM：整体架构与 KV 缓存管理",
+   "推理引擎 · vLLM 官方文档与固定提交源码核查",
+   "04-vllm.md"
   ],
   [
    "05",
-   "vLLM：整体架构与 KV 缓存管理",
-   "推理引擎 · vLLM 官方文档与固定提交源码核查",
-   "05-vllm.md"
+   "vLLM：HDD 接入方案与改动范围",
+   "推理引擎 · HDD 可行性分析",
+   "05-vllm-hdd.md"
   ],
   [
    "06",
-   "vLLM：最底层接入 HDD",
+   "vLLM：可行性验证与判定标准",
    "推理引擎 · HDD 可行性分析",
-   "06-vllm-hdd.md"
+   "06-vllm-validation.md"
   ],
   [
    "07",
-   "vLLM：HDD 接入路线与改动范围",
-   "推理引擎 · HDD 可行性分析",
-   "07-vllm-design.md"
+   "DeepInfer：整体架构与 KV 缓存管理",
+   "推理系统 · DeepSeek 官方文档、开源仓库与技术报告",
+   "07-deepseek.md"
   ],
   [
    "08",
-   "vLLM：可行性验证与判定标准",
+   "DeepInfer（DeepSeek）：HDD 接入方案与改动范围",
    "推理引擎 · HDD 可行性分析",
-   "08-vllm-validation.md"
+   "08-deepseek-hdd.md"
   ],
   [
    "09",
-   "DeepInfer：整体架构与 KV 缓存管理",
-   "推理系统 · DeepSeek 官方文档、开源仓库与技术报告",
-   "09-deepseek.md"
+   "DeepInfer：可行性验证与判定标准",
+   "推理引擎 · HDD 可行性分析",
+   "09-deepseek-validation.md"
   ],
   [
    "10",
-   "DeepInfer：最底层接入 HDD",
-   "推理引擎 · HDD 可行性分析",
-   "10-deepseek-hdd.md"
-  ],
-  [
-   "11",
-   "DeepInfer：HDD 接入路线与改动范围",
-   "推理引擎 · HDD 可行性分析",
-   "11-deepseek-design.md"
-  ],
-  [
-   "12",
-   "DeepInfer：可行性验证与判定标准",
-   "推理引擎 · HDD 可行性分析",
-   "12-deepseek-validation.md"
-  ],
-  [
-   "13",
    "NVIDIA：完整 KV 是否值得长期保存",
    "需求可行性 · 企业上下文研究",
-   "13-context-feasibility.md"
+   "10-context-feasibility.md"
   ]
  ],
  "bigdata-io": [

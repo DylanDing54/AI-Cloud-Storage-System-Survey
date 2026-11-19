@@ -53,7 +53,8 @@
 
 控制台“模型监控”页提供 `cache_tokens` 指标，可按分钟或小时统计。 [PD][ALI1] 文档中的显式缓存示例如下：第一次请求创建 1605 个缓存 Token；第二次请求只改问题，命中 1605 个 Token，另有 15 个 Token 既未命中也未创建。 [PD]
 
-```
+~~~python
+# 出处（据此整理） [PD] https://help.aliyun.com/zh/model-studio/context-cache
 client = OpenAI(api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
 messages = [
@@ -63,7 +64,7 @@ messages = [
 completion = client.chat.completions.create(model="qwen3.8-max", messages=messages)
 print(completion.usage.prompt_tokens_details.cache_creation_input_tokens,
       completion.usage.prompt_tokens_details["cached_tokens"])
-```
+~~~
 
 ### DashInfer：引擎内的前缀缓存、分页与 KV 量化
 
@@ -73,11 +74,13 @@ DashInfer 是阿里在 ModelScope 下开源的 C++ 推理引擎。v2.0（2024/12
 - **SpanAttention 分页布局**：一个 KV 页称为一个 span。长度为 queryLen 的序列占用 ceil(queryLen / spanLen) 个 span。未量化时每个 span 大小为 spanLen × kvHeads × headSize × sizeof(FT)；量化时为 spanLen × kvHeads × headSize × bits / 8，另加 2 × spanLen × kvHeads × sizeof(float) 的量化参数。headSize 目前固定为 128。SpanAttention 不提供 span 管理 API，span 的分配由上层负责。 [ALI4]
 - **KV 量化**：`kv_cache_mode` 有三种取值。`AsCacheDefault` 与推理数据类型一致；`AsCacheQuantI8` 相对 BF16 将 KV 占用减半；`AsCacheQuantU4` 减至 1/4。量化方法与 IQ 权重量化相同，可独立于权重量化开关。 [ALI3]
 
-```
+~~~python
+# 出处（据此整理） [ALI2] https://dashinfer.readthedocs.io/en/latest/llm/prefix_caching.html
+# 出处（据此整理） [ALI3] https://dashinfer.readthedocs.io/en/latest/quant/kv_cache_quant.html
 runtime_cfg_builder.prefill_cache(True)                       # 前缀缓存（默认开）
 runtime_cfg_builder.kv_cache_mode(AsCacheMode.AsCacheQuantI8) # 或 AsCacheQuantU4
 # 环境变量：CPU_CACHE_RATIO=0.3  → 用剩余 CPU 内存的 30% 存放 KV
-```
+~~~
 
 文档公布的前缀缓存测试条件为：Qwen2-7B-Instruct，单张 A100，batch 1，输入 4000 Token，输出 3 Token，20 个请求。在此条件下，平均 context（prefill）时间随命中率变化如下，平均 generate 时间均为 0.040 s。 [ALI2] README 另用 Qwen2-72B-Instruct、4×A100、输入 4000 Token 给出了 TTFT 随命中率下降的图表。 [PE]
 
@@ -143,11 +146,12 @@ PAI 的 KV Cache 服务（FlashKV）是独立于推理服务部署的分布式�
 
 LLM 智能路由由 LLM Gateway 和 LLM Scheduler 组成，默认调度策略为 `prefix-cache`，即把历史上下文相同的请求发往已缓存其 KV 的实例。可选策略还有 `least-request`、`least-token` 和静态 PD 分离 `pd-split`。 [ALI10] 官方测试条件为：vLLM 0.7.3，ShareGPT 多轮数据，5 个后端实例。在此条件下，QwQ-32B 的平均 TTFT 从 1144.62 ms 降到 859.42 ms（+25.0%），Qwen2.5-72B 从 508.55 ms 降到 389.66 ms（+23.4%），Distill-Qwen-7B 仅改善 4.5%；三种模型的吞吐提升在 2.5%–5.95% 之间。文档注明这些结果仅供参考。 [ALI10]
 
-```
+~~~jsonc
+// 出处（据此整理） [ALI10] https://help.aliyun.com/zh/pai/user-guide/use-llm-intelligent-router-to-improve-inference-efficiency
 {"llm_scheduler": {"cpu": 2, "memory": 4000, "policy": "prefix-cache"},
  "llm_gateway":   {"max_queue_size": 128, "retry_count": 2},
  "metadata": {"type": "LLMGatewayService", "instance": 2, "group": "group_llm_gateway"}}
-```
+~~~
 
 ### 与 KV Cache 多级存储（SSD / HDD 下沉）的关系
 

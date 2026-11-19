@@ -25,7 +25,8 @@ Bedrock prompt caching 于 re:Invent 2024 以预览形式发布，官方称其�
 
 以下示例按官方文档的 Converse API 字段写成（Python / boto3），在工具定义与系统提示之后各放一个检查点，并读取缓存计量：
 
-```
+~~~python
+# 出处（据此整理） [PA] https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html
 import boto3
 client = boto3.client("bedrock-runtime", region_name="us-east-1")
 
@@ -46,7 +47,7 @@ u = resp["usage"]
 # 启用缓存后 inputTokens 只含未读/未写缓存的部分
 total_in = u["inputTokens"] + u.get("cacheReadInputTokens", 0) + u.get("cacheWriteInputTokens", 0)
 print(u.get("cacheReadInputTokens"), u.get("cacheWriteInputTokens"), total_in)
-```
+~~~
 
 Converse 响应新增 `cacheReadInputTokens`、`cacheWriteInputTokens` 与记录写入 TTL 的 `cacheDetails`；总输入 token = `inputTokens + cacheReadInputTokens + cacheWriteInputTokens`。只支持 5 分钟 TTL 的模型若带上 `ttl` 字段可能返回 ValidationException。 [PA] OpenAI 模型走 Responses API：GPT-5.6 及以后模型在内容块上加 `"prompt_cache_breakpoint": {"mode": "explicit"}`，用 `prompt_cache_options.mode` 在 implicit（默认，自动在最新消息处放断点并兼用显式断点）与 explicit（只用显式断点；若无断点则不缓存、不产生写入费用）之间切换；用量在 `usage.input_tokens_details.cached_tokens` 与 `cache_write_tokens` 中返回，且两者包含在 `input_tokens` 内。 [PA][AWS7] 官方博客的预览示例中，29,841 个文档 token 首次写入缓存，后续调用全部从缓存读取，耗时比首次少 55%。 [AWS6]
 
@@ -104,7 +105,9 @@ Bedrock 文档对缓存位置给出了一个关键的工程事实：**缓存条�
 
 以上见官方博客、用户指南与部署文档。 [AWS9][AWS10][AWS11][AWS12] 配置写在 `InferenceEndpointConfig` CRD 中：
 
-```
+~~~yaml
+# 出处（据此整理） [AWS9] https://aws.amazon.com/blogs/machine-learning/managed-tiered-kv-cache-and-intelligent-routing-for-amazon-sagemaker-hyperpod/
+# 出处（据此整理） [AWS11] https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-hyperpod-model-deployment-caching-routing.html
 kvCacheSpec:
   enableL1Cache: true
   enableL2Cache: true
@@ -113,7 +116,7 @@ kvCacheSpec:
 intelligentRoutingSpec:
   enabled: true
   routingStrategy: prefixaware        # kvaware / session / roundrobin
-```
+~~~
 
 官方基准：Llama-3.1-70B-Instruct、7 个副本、p5.48xlarge。8K tokens 场景下 P90 TTFT 降低 40%、P50 降低 72%、吞吐提升 24%、成本降低 21%；64K tokens 场景下 P90 TTFT 降低 35%、P50 降低 94%、吞吐提升 38%、成本降低 28%；AWS 托管 tiered storage 在各场景均优于 Redis 作 L2。 [AWS9] 后续版本继续扩展：Operator v3.2（2026-06-12）引入 Disaggregated Prefill and Decode，用 LMCache 经 NIXL 与 EFA（GPU-Direct RDMA）在预填充与解码 Pod 间传输 KV；v3.7（2026-09-21）增加 LMCache MultiProcess 模式，以 sidecar 进程通过 CUDA-IPC 共享 GPU 内存。 [AWS13] Ray Serve 部署同样可接入：LMCache 通过 `sagemaker-hyperpod://$(NODE_IP):9200` 连接节点上的 Tiered Storage 服务，并用 `/dev/shm/ai_toolkit_cache` 走本地 CPU 卸载路径。 [AWS14]
 

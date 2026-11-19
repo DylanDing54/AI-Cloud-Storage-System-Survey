@@ -72,7 +72,8 @@ CoreWeave 的发布新闻稿引用了 Tensormesh CEO 的话：在与 Cohere 一�
 
 LMCache 的 S3 后端文档专门给出了 CoreWeave 的配置示例，并注明 `cwlota.com` 是 CoreWeave 带 GPU 就近缓存的 S3 兼容存储；非 AWS 服务可设置 `disable_tls: True`，并附上了本案例的链接 [L]：
 
-```
+~~~yaml
+# 出处（据此整理） [L] https://docs.lmcache.ai/kv_cache/storage_backends/s3.html
 chunk_size: 256
 local_cpu: False
 max_local_cpu_size: 50
@@ -90,7 +91,7 @@ extra_config:
   disable_tls: True
   aws_access_key_id: "your-access-key-id"
   aws_secret_access_key: "your-secret-access-key"
-```
+~~~
 
 与同一页面的 AWS S3 示例（64 个 CRT I/O 线程）相比，CoreWeave 示例开启了异步加载、把 I/O 线程提高到 320、关闭 HTTP/2，并以 LOTA 端点为 bucket 域名 [L]。在 LMCache 新的 MP 模式下，相同的后端应改用 `--l2-adapter '{"type": "s3", ...}'` 的写法，且对象命名规则与旧版不兼容 [L]。CoreWeave 的性能指南还建议每次请求至少读 15 MB（低于 1 MB 时性能明显下降），并以每节点约 300 个并发作为起点调优 [CWV3]。按上一章的估算，256 token 的 chunk 对中等规模的 GQA 模型通常在几十 MB 量级，大体符合这一建议；对 KV 更紧凑的模型，则需增大 chunk（本文分析）。
 

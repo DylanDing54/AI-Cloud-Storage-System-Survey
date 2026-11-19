@@ -69,14 +69,15 @@ Mooncake 不同材料中的数字口径差异很大，引用时必须带上条�
 
 与官方基准一致的最小配置示例（Master 与 Client 开启下沉，SGLang 以 Mooncake 作 HiCache 存储后端）：
 
-```
+~~~bash
+# 出处（据此整理） [MC5] https://kvcache-ai.github.io/Mooncake/performance/mooncake/ssd-offload-benchmark-results.html
 mooncake_master -enable_offload=true -http_metadata_server_port=8081
 MOONCAKE_OFFLOAD_FILE_STORAGE_PATH=/mnt/data/file_storage \
 MOONCAKE_OFFLOAD_LOCAL_BUFFER_SIZE_BYTES=21474836480 \
 mooncake_client --global_segment_size=80GB --protocol=rdma ...
 python3 -m sglang.launch_server ... --enable-hierarchical-cache \
   --hicache-storage-backend mooncake
-```
+~~~
 
 [MC5]
 

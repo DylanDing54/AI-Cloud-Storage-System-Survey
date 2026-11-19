@@ -20,7 +20,8 @@
 
 **前缀缓存（显式）**：文档（更新时间 2026-01-05）称其为“一次性缓存”，适合人设、开场白、规则化模板、超长文本分析等固定前缀。使用前要先调用缓存创建 API 写入内容。支持型号包括 DeepSeek-V3.2、V3.1、V3、R1 等。该能力目前为邀测，需要提交工单开通。 [BD8]
 
-```
+~~~http
+# 出处（据此整理） [BD8] https://cloud.baidu.com/doc/qianfan-docs/s/Lmhuc7c2o
 # 1. 创建前缀缓存（官方文档示例，鉴权头从略）
 POST https://qianfan.baidubce.com/v2/caching
 {"model": "deepseek-v3.1-250821",
@@ -34,7 +35,7 @@ POST https://qianfan.baidubce.com/v2/chat/completions
  "messages": [{"role": "user", "content": "你是谁"}]}
 
 # 3. 查询（返回 expire_at）/ 删除：GET 与 DELETE https://qianfan.baidubce.com/v2/caching/{cache_id}
-```
+~~~
 
 生命周期与计费：`ttl` 以秒为单位，从创建时开始计时，超时后缓存被删除；每次用该缓存发起对话，过期时间都会按 ttl 重新计算。费用分四部分：未命中的输入按标准输入单价；命中的输入按标准输入单价的 20% 或 25%；缓存存储按“每个自然小时的最大缓存量 × 单价”累加，从创建时起计，直到缓存被删除（ttl 到期或调用删除 API）为止，不足 1 小时按 1 小时计；输出按标准单价。以价目表为例，deepseek-v3.2 在输入 [0, 32k] 档的输入 / 命中 / 存储 / 输出单价依次为 0.002 / 0.0004 / 0.000017（元/千 tokens/小时）/ 0.003 元/千 tokens。可见这一 API 把缓存当作带有存储时长成本的资源来收费，不只是命中折扣。 [BD8]
 
@@ -71,13 +72,14 @@ POST https://qianfan.baidubce.com/v2/chat/completions
 
 *FastDeploy 官方文档《全局缓存池化》GitHub 页面截图：Mooncake Master 协调多个 FastDeploy 实例（Prefill / Decode / Standalone）共享 MooncakeStore KV 池（采集于 2026-11-18）* — [原始来源](https://github.com/PaddlePaddle/FastDeploy/blob/develop/docs/zh/features/global_cache_pooling.md)
 
-```
+~~~bash
+# 出处（据此整理） [PG] https://github.com/PaddlePaddle/FastDeploy/blob/develop/docs/features/global_cache_pooling.md
 # Decode 实例（官方文档场景二节选）
 export MOONCAKE_MASTER_SERVER_ADDR="127.0.0.1:15001"
 export MOONCAKE_METADATA_SERVER="http://127.0.0.1:15002/metadata"
 export MOONCAKE_PROTOCOL="rdma"
 python -m fastdeploy.entrypoints.openai.api_server --model ${MODEL_NAME} --port 52500 --splitwise-role decode --cache-transfer-protocol rdma --router "0.0.0.0:52700" --enable-output-caching --kvcache-storage-backend mooncake
-```
+~~~
 
 **源码层面的三级层次与写策略**（develop 分支，采集于 2026-11-18）：命令行 `--kvcache-storage-backend` 的可选值为 `mooncake`、`attention_store`、`file`。设置后会自动开启前缀缓存，且要求 V1 调度器。`--write-policy` 可选 `write_through`、`write_through_selective`（默认，按 `--write-through-threshold` 命中次数阈值写入，默认 2）、`write_back`。 [BD5] `cache_manager/v1` 的注释把层次定义为 Device（GPU）→ Host（CPU）→ Storage，并说明 Storage 中的数据需要先取到 Host。RadixTree 为 Device 和 Host 分别维护可淘汰集合，按 `last_access_time` 选出 LRU 节点；`ref_count` 为 0 的节点才可淘汰。write_back 策略下，Device 块被淘汰时转移到 Host。 [BD6] `file` 后端把每个 KV 键写成目录下的一个 `{key}.pd` 文件，`attention_store` 后端依赖 `attentionstore_sdk` 包。这两个后端目前只在源码中出现，《全局缓存池化》文档只写了 Mooncake。 [BD5][BD6]
 

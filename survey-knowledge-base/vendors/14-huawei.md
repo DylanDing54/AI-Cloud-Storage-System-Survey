@@ -38,7 +38,8 @@ README 对图中三个核心抽象的解释是：`UcmSparseBase` 是各类稀疏
 
 容量与回收方面，文档给出的默认主机缓冲为：原生 Cache 启用共享缓冲时 256 GiB，关闭共享时每个 worker 32 GiB，当前 vLLM Connector 启用共享缓冲时 128 GiB；`posix_capacity_gb: 0` 表示不启用基于容量的垃圾回收，正数只是逻辑预算、不预留文件系统空间，vLLM 路径下 Posix GC 由 DP0 scheduler 负责。配置示例如下（取自官方 Pipeline 文档）： [HWI3]
 
-```
+~~~yaml
+# 出处（据此整理） [HWI3] https://github.com/ModelEngine-Group/unified-cache-management/tree/main/docs/docs-site/docs/zh/developer-guide/cache-configuration
 ucm_connectors:
   - ucm_connector_name: "UcmPipelineStore"
     ucm_connector_config:
@@ -48,7 +49,7 @@ ucm_connectors:
       # cache_buffer_capacity_gb: 256
       # posix_capacity_gb: 1024
 use_layerwise: true
-```
+~~~
 
 文档同时提醒：外部复用是用查询、读取、传输和同步替换一部分 prefill，只有省下的计算时间超过这些开销，端到端时延才可能改善；前缀重复比例、块粒度、存储带宽、主机缓存状态和排队都会影响结果。 [HWI2]
 
