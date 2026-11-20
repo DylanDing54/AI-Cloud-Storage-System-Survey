@@ -75,6 +75,88 @@
 
 KV 实际落在 H100 HBM、SSD 服务器上的 15.36TB SSD 缓存，以及 HDD 服务器上的 360TB HDD 容量层；GPU 服务器的 2.0 TiB DRAM 可作为 KVBM 的 CPU 层，但白皮书没有写这一层的配置值。HDD 在来源中明确出现，是 NVMe-oF 后端的 durable 层，不直接连接 GPU 服务器。
 
+### 联合白皮书的研究问题与容量假设
+
+SK hynix 的 Kyung Soo Lee、Jin Na Yang 与 Seagate 的 Thomas Prohofsky 研究的是用户带着原有上下文回到推理服务时，系统应当读回 KV，还是再次用 GPU 计算整段前缀。客服、预测维护和跨部门的多智能体工作流可能持续数周。每次请求会把此前的回答和新的问题一起带入下一轮，长期保留 KV 的成本因此取决于并发用户数、上下文长度和两次访问之间的间隔。下文按白皮书 SC135.1-2605US 的表 1 和图 1–22 给出配置、比较对象及结果。[Seagate 发布页](https://www.seagate.com/cn/zh/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/)
+
+**同一张 GPU 能留下多久的历史？** 作者引用 NVIDIA 的案例，智能体工作负载产生的 token 最多可达传统聊天机器人的 15 倍。另据 Microsoft 的 72 GPU 机架达到 110 万 token/s 的案例，作者推算每张 GPU 每天可能产生约 92 TB 的 KV。若持续按这一速率写入，80 GB HBM 约保留 1.2 分钟，1 TB DRAM 约 16 分钟。模型也影响这一换算，白皮书举出的 Qwen2.5-7B 和 72B 每 token 分别需要 56 KB 和 320 KB KV。上述案例用于估算容量，后文的延迟实验用的是 DeepSeek-R1-Distill-Llama-8B。[原文第 3–5 页，图 1–3](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=3) · [第 11 页，模型示例](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=11)
+
+| 原文图 2、16 的介质示例 | 容量 | 按上述生成速率折算的保留时间 |
+|---|---|---|
+| GPU HBM | 80 GB | 0.02 小时 |
+| 主机 DDR5 | 1 TB | 0.27 小时 |
+| SSD × 4 | 32 TB | 8.3 小时 |
+| HDD × 12 或以它为容量层的混合卷 | 360 TB | 93.9 小时，约 3.9 天 |
+
+图 16 的约 11 倍来自 93.9 与 8.3 小时之比。混合卷的 SSD 用作缓存，不能把缓存容量再次加进 HDD 的保留容量。图 17 对相同容量示例标出的单位价格为全 SSD 0.19 美元/GB、全 HDD 0.024 美元/GB、混合 0.04 美元/GB，作者概括为混合相对全 SSD 节省约 75%。**这两张图的全 SSD 均按 32 TB 作图，表 1 实测平台的四块 SSD 合计 15.36 TB。** 图示价格和时长用于方案比较，测试没有让会话实际闲置 93.9 小时再恢复。[原文第 12 页，图 16、17](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=12)
+
+作者用 Omdia 的 2025 年价格说明把历史全部放在内存里的代价，HBM3E 12Hi 约 14 美元/GB，DDR5 约 8.50 美元/GB，按已部署字节计算 DRAM 约为 NVMe SSD 的 44 倍。Forward Insights 的 2016–2026 年序列则比较 SSD 与 HDD 的每 TB 价格，过去十年 SSD 平均约为 HDD 的 10 倍，2026 年约为 16 倍。两组价格资料、图 17 的方案示例和机房整体拥有成本各有各的口径。[原文第 4–5 页，图 3 及文献 4–6](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=5)
+
+### 从请求路由到共享卷
+
+**计算与存储如何协同。** 图 4–8 从一次前缀命中展开。前端 KV-aware router 用索引定位可复用的块。架构允许 prefill worker 把算好的块提交到共享卷，decode worker 根据块映射按需取回。KVBM 跟踪分配、固定、淘汰和复用，NATS 通过发布/订阅分发位置元数据。真正的 KV 载荷由 NIXL 经各节点所见的 EXT4 挂载目标传送，GDS 与 NVMe-oF/RDMA 使数据能直接进入 GPU 显存。这样，即使某个 worker 退出，其他节点仍可读取已经提交的块。单个 worker 的显存容量也不再决定整份历史的寿命。[原文第 6–9 页，图 4–8](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=7)
+
+**目标卷如何构成。** HDD 服务器用 SPDK 导出磁盘，SSD 服务器把后端聚合成逻辑卷，OCF 在卷前缓存活跃数据，GPU 服务器作为 NVMe-oF 发起端。四块 PCIe Gen5、V-NAND TLC 的 PS1010 并行服务读写，设计目标是匹配 GPU 的 PCIe 5.0 ×16 接口。CMR 写入的 Mozaic HAMR Exos 保存冷块。SPDK 目标程序可在存储服务器、DPU 或云节点上运行。作者还提出为 LVM 共享卷组接入 Seagate In-Drive Mutex，并由 Kubernetes CSI 动态分配卷。这是可选部署方式，三机测试实际采用的介质、CPU 和网络规格见本节上表。[原文第 7–8 页，表 1、图 5、6](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=8)
+
+**软件版本和协议边界。** 表 1 记载 GPU 与 SSD 节点均为 Ubuntu 22.04.5 LTS，内核版本按表原记为 6.8.0.-94-generic。HDD 节点为 Rocky Linux 9.6，内核记为 5.14.0-570.58.el9_6x86_64。GPU 节点使用 CUDA 12.8 和 NVIDIA 驱动 570.86.10。原文将 RDMA 网卡间的硬件传输与经过 TCP、TLS、HTTP、负载均衡器及对象服务的路径比较，前者典型端到端 p99 低于 100 µs，后者的握手和请求处理可能增加数千 µs。这是作者对协议路径的描述。实验中包含机械寻道、读回前缀与服务排队的首 token 时间另见下表。[原文第 7–8 页](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=8)
+
+选用 GDS 的另一项依据来自外部研究。相对 POSIX 读写，作者引述的结果为带宽最高 2.8 倍、CPU 开销降低 3–5 倍。另一项研究报告服务器功耗约低 7 W。这些数字说明为何选择直接数据通路。本白皮书自己的 GPU 利用率和功耗实验使用单独的短输出负载。[原文第 6 页，文献 8、9](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=6)
+
+### LMBenchmark 如何隔离重算、冷恢复与热命中
+
+实验以合成的长输入、短输出多轮对话驱动 KVBM。重算组关闭前缀缓存和卸载，每轮重新 prefill。全 SSD 组同时开启两项功能，KV 可在 HBM 和四块 SSD 间复用。混合组增加 HDD 层，先用 pass-through 把初次提示写进 HDD，再切到 write-back 模拟用户恢复会话。第一次读回会填充 SSD，同一轮交互突发内后续恢复达到 100% SSD 命中。实验控制了初始冷热状态，没有测量真实用户两次回访的间隔分布。图 7 给出可分离 prefill/decode 的架构，图 14、15 的延迟测量实际采用未分离部署。[原文第 9–10 页，图 7–9](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=9) · [第 12 页，图 14、15](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=12)
+
+下表按实验列出负载。ISL、OSL 分别为输入、输出 token 数。除单列说明外，输入为 21K、输出为 100。各图分别改变请求速率、用户数、轮数或输出长度。
+
+| 指标与原图 | 实验条件 | 图中观测 |
+|---|---|---|
+| 卸载和读回的 I/O 构成（图 10、11） | 15 用户，QPS 0.1 | 卸载时约 72% 随机写、28% 顺序写，单次请求 128 KB，等于该混合卷的最大传输大小 MDTS。读回时约 83% 随机读、17% 顺序读。每轮还会按输出长度产生新增 KV 写入，占总 I/O 不足 1%。作者据此要求后端针对 128 KB 及以上随机访问优化。 |
+| 逐轮 TTFT（图 12） | 15 用户，QPS 0.5，观察第 1–15 轮 | 重算约从 2 秒升至 40 秒，随后回落并停在约 20 秒。最初请求积压，GPU 饱和后排队延迟维持高位。客户端收到上一轮答复才发下一轮，实际到达速率下降后积压逐步消退。全 SSD 各轮为 0.16–0.19 秒。 |
+| 增加用户数（图 13） | QPS 1，10 轮，依次取 10、20、30、40、50 用户 | 重算 TTFT 分别为 11、62、110、158、209 秒，作者概括为增至约 20 倍。全 SSD 在同五个点为 0.16、0.16、0.17、0.16、0.16 秒。 |
+| 混合卷与每轮重算（图 14、15） | 15 用户，QPS 1，10 轮，未分离 prefill/decode | TTFT 从 35.24 秒降至 1.75 秒，约降 95%。图中端到端延迟从 753.33 秒降至 153.57 秒，约降 80%。两项百分比都以重算组为基准。 |
+| 一次冷恢复如何被后续轮次摊薄（图 18） | 15 用户，QPS 1，比较 1–50 轮 | 与全 SSD 比较，作者报告平均 TTFT 差距由单轮 7.6 秒缩至 50 轮 0.35 秒。一次 HDD 读回之后，后续多轮由 SSD 服务。 |
+| 读带宽随运行时间变化（图 19） | 15 用户，QPS 4 | 运行到 100、300、600、1,000 秒时，全 SSD 分别为 25、25、26、26 GB/s，混合卷分别为 3、17、20、22 GB/s。同期差距从 88% 缩至 15%。 |
+
+[原文第 11 页，图 10–13](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=11) · [第 12 页，图 14–17](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=12) · [第 13 页，图 18、19](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=13)
+
+### 冷恢复的硬盘扩展曲线与 GPU 功耗
+
+为单独观察 HDD 带宽，作者让 I/O 绕过 SSD，用 15 个用户、QPS 1、ISL 21K、OSL 100、运行 50 秒的配置观察单轮恢复。多盘组成一个逻辑卷，将同一批 KV 的读取分布到多块盘。图 20 给出首 token 时间，图 21 同时画出峰值和平均读带宽。[原文第 14 页，图 20、21](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=14)
+
+| HDD 数量 | 数据性质 | 单轮 TTFT（秒） | 峰值 / 平均读带宽（GB/s） |
+|---|---|---:|---:|
+| 4 | 实测 | 67.89 | 0.70 / 0.37 |
+| 8 | 实测 | 34.43 | 1.10 / 0.75 |
+| 12 | 实测 | 19.88 | 1.50 / 1.26 |
+| 24 | 作者外推 | 10.08 | 2.55 / 2.55 |
+| 36 及以上 | 网络受限时的预测平台 | 8.24 | 3.13 / 3.13 |
+
+从 4 增至 12 块时，峰值与平均带宽的差距由接近一倍缩至约 20%。作者预计从 12 到 24 块可再缩短约一半 TTFT，24 块可满足该模型的吞吐需求，继续加盘最多比 12 块缩短约 60%。原文图 6 的 HDD 链路标为 25 Gb/s，图 20、21 却标为 25 GB/s。图 21 的平台值 3.13 GB/s 与 25 Gb/s 的单位换算相符。盘数选型应以实测的三行及实际链路规格为依据。[原文第 8 页，图 6](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=8) · [第 14 页，图 20、21](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=14)
+
+**只看 prefill 的独立实验。** 图 22 将输出缩短到 2 个 token，保留 21K 输入、15 用户和 QPS 1。重算组的 GPU 利用率为 99.7%，混合卷复用组为 23.8%，相对降幅 76.1%。作者另报告该阶段测得功耗比重算低 52%。空出的计算时间可以用来生成新前缀或服务其他请求。原文没有给出绝对瓦数、每请求能耗或整个集群的节电比例。[原文第 14 页，图 22](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=14)
+
+### 白皮书结论与待验证的部署选择
+
+作者认为，高容量共享卷能让历史前缀跨 worker 和跨会话保留，SSD 承接连续交互，HDD 承接较长的空闲期。扩充 SSD 可以让更大的活跃工作集保持低延迟。扩大 HDD 主要延长保留窗口，多盘并行还可缩短首次恢复。文末提出保留数天、数周乃至数月的部署目标。实际收益取决于 KV 生成速率、可用容量、回访频率，以及首次回读能否比重新 prefill 更快。原文把以下三项列作后续研究。[原文第 12、15 页](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/files/kv-caching-white-paper.pdf#page=15)
+
+| 待验证方案 | 作者提出的机制与比较指标 |
+|---|---|
+| Dynamo 预取提示 | 订阅与后端存储对应的 NATS 主题，在调度、分派 prefill worker 的同时触发 HDD 读回，比较首次恢复等待时间。 |
+| 本地或远端 S3 与 NVMe-oF | 比较近端、远端及高性能对象存储与 RDMA 块目标，观察简化部署和扩容所带来的收益，以及对象协议和网络路径增加的延迟。 |
+| GPU 侧 cuComp 压缩 | 在 KV 离开 GPU 前压缩，读回时解压，评估传输字节数、占用空间、token 吞吐及 TTFT 之间的取舍。 |
+
+#### 白皮书原图索引
+
+[图 1 多智能体上下文增长](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-1.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 2 各层保留时间](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-2.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 3 介质价格比](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-3.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 4 卸载与前缀命中](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-4.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 5 KV管理层级](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-5.png/_jcr_content/renditions/16-10-medium-640x400.png)
+
+[图 6 三机连线](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-6.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 7 Dynamo与存储栈](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-7.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 8 一次回访的读写过程](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-8.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 9 测试阶段切换](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-9.png/_jcr_content/renditions/16-10-medium-640x400.png)
+
+[图 10 卸载期I/O](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-10.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 11 读回期I/O](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-11.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 12 逐轮TTFT](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-12.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 13 并发用户数](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-13.png/_jcr_content/renditions/16-10-medium-640x400.png)
+
+[图 14 首token延迟](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-14.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 15 端到端延迟](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-15.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 16 保留窗口](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-16.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 17 每GB成本](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-17.png/_jcr_content/renditions/16-10-medium-640x400.png)
+
+[图 18 多轮平均TTFT](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-18.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 19 随时间变化的带宽](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-19.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 20 首轮TTFT与盘数](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-20.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 21 峰值和平均带宽](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-21.png/_jcr_content/renditions/16-10-medium-640x400.png) · [图 22 prefill利用率](https://www.seagate.com/content/dam/seagate/assets/resources/enabling-inference-at-massive-scale-with-hybrid-storage-for-kv-cache-offloading/figure-22.png/_jcr_content/renditions/16-10-medium-640x400.png)
+
 ## 本章资料
 
 - **[PLSG1]** [Open CAS 官方文档 · Cache configuration / Cache operations / Promotion policies（cache 模式、LRU 淘汰、nhit 晋升，open-cas.github.io 提交 bb4455a，采集于 2026-11-19）](https://github.com/Open-CAS/open-cas.github.io/blob/bb4455adecc144fa9585e2d42b9d36379bafda61/content/concepts/cache-operations.md)
