@@ -3,7 +3,7 @@
 A survey in two books:
 
 - **Book I · AI** — how cloud service providers (CSPs), inference engines and storage vendors manage the LLM KV cache across memory and storage tiers (HBM → DRAM → SSD → remote pool → HDD), followed by a feasibility analysis of using HDD as the bottom tier.
-- **Book II · Big data** — how EB-scale storage systems optimize HDD I/O, what constrains the use of high-capacity, high-density HDDs, why some Chinese customers say HDD capacity need not be large, and what an HDD provider must do to create genuine demand for larger drives.
+- **Book II · Big data** — how EB-scale storage systems optimize HDD I/O, what constrains the use of high-capacity, high-density HDDs, what drives the preference for mid-capacity HDDs in some Chinese big-data deployments, and under what conditions larger drives deliver real value.
 
 **Read online:** https://dylanding54.github.io/AI-Cloud-Storage-System-Survey/report/
 
@@ -24,7 +24,7 @@ A survey in two books:
 ### Book II · Big data
 
 - **Part 3 · Big-data I/O optimization:** AWS S3 / ShardStore, Google Colossus, Meta Tectonic / Tectonic-Shift / f4, Microsoft Azure Storage / LRC / Pelican, Alibaba Pangu / SMRSTORE / OSS, Chinese vendors (Huawei OceanStor Pacific, Tencent) and storage-capacity policy, HDFS / Ozone / Ceph, Dropbox Magic Pocket and Backblaze, HDD vendor density and interface technology — the I/O optimizations each uses and how they relate to HDD capacity and density
-- **Part 4 · HDD density and capacity:** constraints (IOPS/TB and tail latency; rebuild, failure domains and reliability; SMR / zoned write model; TCO, power and rack density), Chinese customer scenarios, an action plan for creating genuine demand for high-capacity drives, and a validation plan with pass criteria
+- **Part 4 · HDD density and capacity:** constraints (IOPS/TB and tail latency; rebuild, failure domains and reliability; SMR / zoned write model; TCO, power and rack density), capacity preferences in Chinese big-data deployments, and recommendations on where and how high-capacity drives deliver real value
 
 - Each part ends with a consolidated list of reference links.
 

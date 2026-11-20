@@ -197,6 +197,8 @@ All references cited in the report, keyed as in the report text.
 | DS15 | DeepSeek-AI · DeepSeek-V3 Technical Report（arXiv:2412.19437，2024-12；§3.4 推理与部署） | <https://arxiv.org/abs/2412.19437> |
 | DS16 | DeepSeek 官方 Hugging Face · deepseek-ai/DeepSeek-V3 config.json（kv_lora_rank、qk_rope_head_dim、num_hidden_layers 等，采集于 2026-11-18） | <https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json> |
 | DS17 | DeepInfer · LLMEngine：请求接入、C++ 调度、Worker 执行与结果处理（固定提交） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/deepinfer/engine/llm_engine.py> |
+| DS18 | DeepInfer · BlockManagerMutexAcquire 与 block/state 联合准入（固定提交） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/csrc/engine/block_manager.hpp#L190-L240> |
+| DS19 | DeepInfer · CacheEngine：层所有权、SWA 与压缩状态的物理布局（固定提交） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/deepinfer/worker/cache_engine.py#L149-L305> |
 | DS2 | DeepSeek 官方 GitHub · DeepInfer doc/inference_deployment_qa.md《DeepSeek V4.1 Flash Inference Deployment Q&A》（v0.2，2026-11-03；KV cache storage、3FS、负载均衡、SWA bounded replay，采集于 2026-11-18） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/doc/inference_deployment_qa.md> |
 | DS3 | DeepSeek 官方 GitHub · DeepInfer 源码 csrc/engine/block_manager.hpp、deepinfer/worker/cache_engine.py、deepinfer/model_executor/model_metadata_utils.py、deepinfer/hugging_face/config.py（固定提交 a679bb86，采集于 2026-11-18） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/deepinfer/worker/cache_engine.py> |
 | DS4 | DeepSeek 官方 Hugging Face · deepseek-ai/DeepSeek-V4.1-Flash-1017 config.json（num_hidden_layers、compress_ratios、kv_source_layer_ids、index_head_dim、sliding_window，采集于 2026-11-18） | <https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017/blob/main/config.json> |
@@ -495,6 +497,8 @@ All references cited in the report, keyed as in the report text.
 | SGI31 | SGLang · TP Worker 与 ModelRunner 执行入口（固定提交） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers/tp_worker.py> |
 | SGI32 | SGLang · P/D disaggregation：传输后端、设备选择与部署拓扑（固定提交） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/docs/docs/advanced_features/pd_disaggregation.mdx> |
 | SGI33 | SGLang · HiCache：各层可见性、数据布局、I/O 内核与多 rank 同步（固定提交） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/docs/docs/advanced_features/hicache_design.mdx> |
+| SGI34 | LMSYS / SGLang · HiCache Across Multi-Parallelism and Distributed Serving，2026-11-02 | <https://lmsys.org/blog/2026-11-02-hicache-distributed-serving/> |
+| SGI35 | SGLang · HiCache host pool 自动定容与跨 rank 最小值（固定提交） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/mem_cache/hicache_auto_size.py#L60-L152> |
 | SGI4 | SGLang 官方仓库 · 固定提交 c712459e7f82（2026-11-16）· allocation.py（alloc_for_extend、alloc_req_slots、alloc_paged_token_slots_extend、alloc_for_decode） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/mem_cache/allocation.py> |
 | SGI5 | SGLang 官方仓库 · 固定提交 c712459e7f82（2026-11-16）· common.py（match_kv_cache、checkpoint_kv_cache、release_kv_cache、evict_from_tree_cache） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/mem_cache/common.py> |
 | SGI6 | SGLang 官方仓库 · 固定提交 c712459e7f82（2026-11-16）· managers/schedule_policy.py（SchedulePolicy、LPM / in-batch 前缀去重、PrefillAdder） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/managers/schedule_policy.py> |
@@ -533,6 +537,9 @@ All references cited in the report, keyed as in the report text.
 | VL20 | vLLM V1 · EngineCore.step 与 step_with_batch_queue（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/engine/core.py> |
 | VL21 | vLLM · 并行扩展、多节点通信与 GPUDirect RDMA 验证（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/serving/parallelism_scaling.md> |
 | VL22 | vLLM · NixlConnector：侧通道、UCX、设备选择及 P/D 读取方向（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/features/nixl_connector_usage.md> |
+| VL23 | vLLM V1 GPU Worker · determine_available_memory 与显存 profile（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/worker/gpu_worker.py#L716-L826> |
+| VL24 | vLLM V1 BlockPool · 重新分配、解除固定、可写判定与释放（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/core/block_pool.py#L681-L824> |
+| VL25 | vLLM · NIXL KV Cache Lease：跨实例块固定、续约、完成与超时回收（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/design/nixl_kv_cache_lease.md> |
 | VL3 | vLLM 官方文档 · KV Offloading Usage Guide（OffloadingConnector、TieringOffloadingSpec、fs / obj / p2p 二级层、On-Disk Layout、max_load_tokens，采集于 2026-11-18） | <https://docs.vllm.ai/en/latest/features/kv_offloading_usage/> |
 | VL4 | vLLM 官方文档 · Disaggregated Prefilling (experimental)（各 connector 用法与高层设计图，采集于 2026-11-18） | <https://docs.vllm.ai/en/latest/features/disagg_prefill/> |
 | VL5 | vLLM 官方博客 · Inside vLLM's New KV Offloading Connector: Smarter Memory Transfer for Maximizing Inference Throughput（Or Ozeri、Danny Harnik，IBM Research），2026-01-08 | <https://vllm.ai/blog/2026-01-08-kv-offloading-connector> |
@@ -542,10 +549,3 @@ All references cited in the report, keyed as in the report text.
 | VL9 | vLLM 固定提交源码 · vllm/v1/kv_offload/tiering/fs/manager.py 与 io.py（FileSystemTierManager、batch_store_block / batch_load_block、probe_o_direct） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/kv_offload/tiering/fs/manager.py> |
 | W | WD × Solidigm · KV Cache Offload Across Storage Tiers，September 2026 / Revision 02 | <https://documents.westerndigital.com/content/dam/doc-library/en_us/assets/public/western-digital/collateral/tech-brief/technical-brief-kv-cache-offload-across-storage-tiers-wd.pdf> |
 | WP | WD · KV Cache Offload 官方介绍 | <https://www.westerndigital.com/resources/technical-brief/kv-cache-offload-tiered-storage-benchmark> |
-| SGI34 | LMSYS / SGLang · HiCache Across Multi-Parallelism and Distributed Serving，2026-11-02 | <https://lmsys.org/blog/2026-11-02-hicache-distributed-serving/> |
-| SGI35 | SGLang · HiCache host pool 自动定容与跨 rank 最小值（固定提交） | <https://github.com/sgl-project/sglang/blob/c712459e7f8233302fdf0bdd5d4ddcd22aa4b2ab/python/sglang/srt/mem_cache/hicache_auto_size.py#L60-L152> |
-| VL23 | vLLM V1 GPU Worker · determine_available_memory 与显存 profile（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/worker/gpu_worker.py#L716-L826> |
-| VL24 | vLLM V1 BlockPool · 重新分配、解除固定、可写判定与释放（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/vllm/v1/core/block_pool.py#L681-L824> |
-| VL25 | vLLM · NIXL KV Cache Lease：跨实例块固定、续约、完成与超时回收（固定提交） | <https://github.com/vllm-project/vllm/blob/0c80c3a6aa0201d1b4f71915f90c03fd64837cec/docs/design/nixl_kv_cache_lease.md> |
-| DS18 | DeepInfer · BlockManagerMutexAcquire 与 block/state 联合准入（固定提交） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/csrc/engine/block_manager.hpp#L190-L240> |
-| DS19 | DeepInfer · CacheEngine：层所有权、SWA 与压缩状态的物理布局（固定提交） | <https://github.com/deepseek-ai/DeepInfer/blob/a679bb86ce36e883a98a97733492b686e5b9a08e/deepinfer/worker/cache_engine.py#L149-L305> |

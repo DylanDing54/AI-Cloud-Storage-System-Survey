@@ -67,9 +67,8 @@ Every vendor chapter includes a 「放置策略：哪些 KV 放到哪一层」 s
 | 02 | 4.1 Constraints | [重建、故障域与数据可靠性](bigdata-capacity/02-cap-reliability.md) | Rebuild time and repair traffic by capacity; RAID vs replication vs EC / LRC; AFR by capacity; mitigations |
 | 03 | 4.1 Constraints | [写入模型约束：SMR / 分区存储与软件改造](bigdata-capacity/03-cap-write.md) | CMR vs DM-/HM-SMR, zone semantics, Linux zoned support, software changes and adopters |
 | 04 | 4.1 Constraints | [成本、功耗与机架密度：大容量盘的 TCO](bigdata-capacity/04-cap-tco.md) | $/usable TB model with IOPS-limited fill, W/TB, rack power limits, embodied carbon claims |
-| 05 | 4.2 Chinese customers | [国内客户为何认为 HDD 容量不需要太大](bigdata-capacity/05-cap-china.md) | Sourced vs inferred reasons, three-way split of objections, customer interview questions |
-| 06 | 4.3 Actions | [让高密度大容量成为真实需求：行动建议](bigdata-capacity/06-cap-actions.md) | Device, system / software and commercial levers mapped to objections; roadmap; where not to push |
-| 07 | 4.3 Actions | [验证方案与判定标准](bigdata-capacity/07-cap-validation.md) | Test scenarios, controlled variables, metrics and pass criteria for proving large drives at a customer |
+| 05 | 4.2 Chinese deployments | [国内大数据场景的容量偏好：成因分析](bigdata-capacity/05-cap-china.md) | Sourced vs inferred reasons for preferring mid-capacity HDDs, three-way split of constraints, requirements-survey questions |
+| 06 | 4.3 Actions | [让高密度大容量成为真实需求：行动建议](bigdata-capacity/06-cap-actions.md) | Device, system / software and commercial levers mapped to the constraints; roadmap; where the largest capacity is not the right choice |
 
 ## Topic notes (`topics/`)
 
@@ -81,5 +80,5 @@ Every vendor chapter includes a 「放置策略：哪些 KV 放到哪一层」 s
 
 ## Other files
 
-- [sources.md](sources.md) — all 538 cited sources with keys and URLs
+- [sources.md](sources.md) — all 545 cited sources with keys and URLs
 - [figures/](figures/) — figures extracted from the report (official diagrams, document screenshots, PDF page renders, block diagrams drawn from source code)
